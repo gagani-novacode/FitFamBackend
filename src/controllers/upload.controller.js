@@ -1,4 +1,4 @@
-import { uploadImage } from '../utils/cloudinary.util.js';
+import path from 'path';
 import logger from '../utils/logger.js';
 
 export const handleImageUpload = async (req, res) => {
@@ -8,12 +8,10 @@ export const handleImageUpload = async (req, res) => {
       return res.status(400).json({ ok: false, error: "No file uploaded" });
     }
 
-    // Convert buffer to base64
-    const b64 = Buffer.from(req.file.buffer).toString("base64");
-    const dataURI = "data:" + req.file.mimetype + ";base64," + b64;
+    // Build the public URL for the saved file
+    const baseUrl = process.env.PUBLIC_URL || `http://localhost:${process.env.PORT || 8080}`;
+    const url = `${baseUrl}/uploads/${req.file.filename}`;
 
-    const url = await uploadImage(dataURI, 'saraku-products');
-    
     logger.info("handleImageUpload: SUCCESS", { url });
     res.json({ ok: true, url });
   } catch (e) {

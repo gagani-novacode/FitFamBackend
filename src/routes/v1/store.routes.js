@@ -18,15 +18,31 @@ import {
   getPaidStoreOrders,
   getAnalytics,
   cleanupExpiredOrders,
+  getAllOrders,
+  updateOrderStatus
 } from "../../controllers/store.controller.js";
 import { handleImageUpload } from "../../controllers/upload.controller.js";
 import { validationResult } from "express-validator";
 
-const upload = multer({ storage: multer.memoryStorage() });
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const uploadDir = path.join(__dirname, '../../uploads');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `${Date.now()}-${Math.round(Math.random() * 1e6)}${ext}`);
+  }
+});
+const upload = multer({ storage });
 
 const r = Router();
 
-/** Middleware to handle validation results */
 const validate = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -41,46 +57,46 @@ const adminLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
 // --- Products ---
 r.get("/products", listProducts);
 
-r.get("/products/:id", 
+r.get("/products/:id",
   param("id").isMongoId().withMessage("Invalid Product ID"),
-  validate, 
+  validate,
   getProductById
 );
 
-r.post("/products", 
-  adminLimiter, 
-  body("productCode").trim().notEmpty().withMessage("productCode is required"),
+r.post("/products",
+  adminLimiter,
   body("name").trim().notEmpty().withMessage("name is required"),
+  body("category").trim().isIn(["Men", "Women", "Accessories"]).withMessage("category must be Men, Women, or Accessories"),
   body("price").isNumeric().withMessage("price must be a number"),
-  validate, 
+  validate,
   createProduct
 );
 
-r.put("/products/:id", 
+r.put("/products/:id",
   adminLimiter,
   param("id").isMongoId().withMessage("Invalid Product ID"),
   body("productCode").optional().trim().notEmpty(),
   body("name").optional().trim().notEmpty(),
   body("price").optional().isNumeric(),
-  validate, 
+  validate,
   updateProduct
 );
 
-r.patch("/products/:id", 
+r.patch("/products/:id",
   adminLimiter,
   param("id").isMongoId().withMessage("Invalid Product ID"),
-  validate, 
+  validate,
   patchProduct
 );
 
 // --- Cart ---
-r.get("/cart", 
+r.get("/cart",
   query("orderRef").optional({ checkFalsy: true }).isUUID().withMessage("Invalid orderRef"),
   validate,
   getCart
 );
 
-r.post("/cart/add", 
+r.post("/cart/add",
   limiter,
   body("orderRef").isUUID().withMessage("Invalid orderRef"),
   body("productId").isMongoId().withMessage("Invalid Product ID"),
@@ -89,7 +105,7 @@ r.post("/cart/add",
   addToCart
 );
 
-r.post("/cart/remove", 
+r.post("/cart/remove",
   limiter,
   body("orderRef").isUUID().withMessage("Invalid orderRef"),
   body("productId").isMongoId().withMessage("Invalid Product ID"),
@@ -97,7 +113,7 @@ r.post("/cart/remove",
   removeFromCart
 );
 
-r.post("/cart/update", 
+r.post("/cart/update",
   limiter,
   body("orderRef").isUUID().withMessage("Invalid orderRef"),
   body("productId").isMongoId().withMessage("Invalid Product ID"),
@@ -107,7 +123,7 @@ r.post("/cart/update",
 );
 
 // --- Checkout & Payment ---
-r.post("/checkout", 
+r.post("/checkout",
   limiter,
   body("orderRef").isUUID().withMessage("Invalid orderRef"),
   body("customer.email").isEmail().withMessage("Valid email required"),
@@ -117,7 +133,7 @@ r.post("/checkout",
   moveToCheckout
 );
 
-r.post("/payment/confirm", 
+r.post("/payment/confirm",
   limiter,
   body("orderRef").isUUID().withMessage("Invalid orderRef"),
   body("paymentDetails.method").notEmpty().withMessage("Payment method required"),
@@ -133,7 +149,7 @@ r.get("/order/status/:orderRef",
   getOrderStatus
 );
 
-// --- Admin ---
+// --- Admin (protected by assertAdmin inside each controller via x-admin-token header) ---
 r.get("/admin/orders/paid", adminLimiter, getPaidStoreOrders);
 r.get("/admin/analytics", adminLimiter, getAnalytics);
 r.post("/admin/cleanup-expired", adminLimiter, cleanupExpiredOrders);
@@ -142,6 +158,14 @@ r.post("/admin/upload-image",
   adminLimiter,
   upload.single("image"),
   handleImageUpload
+);
+
+r.get("/admin/orders", adminLimiter, getAllOrders);
+r.patch("/admin/orders/:id/status", adminLimiter,
+  param("id").isMongoId().withMessage("Invalid Order ID"),
+  body("status").notEmpty().withMessage("Status is required"),
+  validate,
+  updateOrderStatus
 );
 
 export default r;

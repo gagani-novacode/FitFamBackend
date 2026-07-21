@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 import Product from "../models/Product.model.js";
 import StoreOrder from "../models/StoreOrder.model.js";
 import logger from "../utils/logger.js";
-import nodemailer from "nodemailer"; 
+import nodemailer from "nodemailer";
 
 // --- Config & Helpers --------------------------------------------------------------------
 const SMTP_HOST = process.env.SMTP_HOST;
@@ -34,7 +34,7 @@ const assertAdmin = (req) => {
   try {
     const bufA = Buffer.from(adminToken);
     const bufB = Buffer.from(providedToken);
-    
+
     if (bufA.length !== bufB.length || !crypto.timingSafeEqual(bufA, bufB)) {
       logger.warn("Admin access denied: Invalid Token", { path: req.path });
       const err = new Error("Unauthorized: Invalid Admin Token");
@@ -75,25 +75,29 @@ export const createProduct = async (req, res) => {
   logger.info("createProduct: START", { name: req.body.name });
   try {
     assertAdmin(req);
-    const { name, category, price, originalPrice, description, sizes, stock, isNewProduct, isSale, badge, tags, images } = req.body;
-    
+    const {
+      name, category, subCategory, price, originalPrice, description,
+      sizes, stock, images, isNewProduct, isSale, badge, tags
+    } = req.body;
+
     if (!name || !category || price === undefined) {
       return res.status(400).json({ ok: false, error: "name, category, price are required" });
     }
 
     const product = await Product.create({
-      name: escapeHTML(name), 
+      name: escapeHTML(name),
       category: escapeHTML(category),
-      price: Number(price), 
+      subCategory: escapeHTML(subCategory || ""),
+      price: Number(price),
       originalPrice: originalPrice ? Number(originalPrice) : undefined,
       description: escapeHTML(description),
       images: Array.isArray(images) ? images : [],
       sizes: Array.isArray(sizes) ? sizes : [],
-      stock: typeof stock === 'object' ? stock : {},
+      stock: typeof stock === "object" ? stock : {},
       isNewProduct: !!isNewProduct,
       isSale: !!isSale,
       badge: escapeHTML(badge),
-      tags: Array.isArray(tags) ? tags.map(escapeHTML) : []
+      tags: Array.isArray(tags) ? tags.map(escapeHTML) : [],
     });
 
     logger.info("createProduct: SUCCESS", { productId: product._id });
@@ -118,7 +122,7 @@ export const updateProduct = async (req, res) => {
       logger.warn("updateProduct: Product not found", { productId: id });
       return res.status(404).json({ ok: false, error: "Product not found" });
     }
-    
+
     logger.info("updateProduct: SUCCESS", { productId: id });
     res.json({ ok: true, product: updated });
   } catch (e) {
@@ -141,7 +145,7 @@ export const patchProduct = async (req, res) => {
       logger.warn("patchProduct: Product not found", { productId: id });
       return res.status(404).json({ ok: false, error: "Product not found" });
     }
-    
+
     logger.info("patchProduct: SUCCESS", { productId: id });
     res.json({ ok: true, product: updated });
   } catch (e) {
@@ -156,6 +160,10 @@ export const listProducts = async (req, res) => {
   const C = "[storeController]";
   logger.info(`${C} :: listProducts() : Start`);
   try {
+    const { category, subCategory } = req.query;
+    const filter = {};
+    if (category) filter.category = category;
+    if (subCategory) filter.subCategory = subCategory;
     const products = await Product.find().lean();
     logger.info(`${C} :: listProducts() : End`);
     res.json({ ok: true, products });
@@ -242,7 +250,7 @@ export const addToCart = async (req, res) => {
       });
     }
 
-    cart.total = cart.items.reduce((acc, it) => acc + it.lineTotal, 0) + 400; 
+    cart.total = cart.items.reduce((acc, it) => acc + it.lineTotal, 0) + 400;
     await cart.save();
 
     logger.info(`${C} :: addToCart() : End`);
@@ -330,7 +338,7 @@ export const moveToCheckout = async (req, res) => {
         const stockKey = `stock.${it.size}`;
         const query = { _id: it.product };
         query[stockKey] = { $gte: it.qty };
-        
+
         const update = { $inc: {} };
         update.$inc[stockKey] = -it.qty;
 
@@ -494,27 +502,30 @@ export const getAnalytics = async (req, res) => {
   logger.info("getAnalytics: START");
   try {
     assertAdmin(req);
-    
+
+    // Statuses that count as "revenue generated"
+    const revenueStatuses = { status: { $in: ["PAID", "DISPATCHED", "COMPLETED"] } };
+
     // 1. Summary Metrics
     const totalRevenue = await StoreOrder.aggregate([
-      { $match: { status: "PAID" } },
+      { $match: revenueStatuses },
       { $group: { _id: null, total: { $sum: "$total" } } }
     ]);
-    
-    const paidOrdersCount = await StoreOrder.countDocuments({ status: "PAID" });
+
+    const paidOrdersCount = await StoreOrder.countDocuments(revenueStatuses);
     const pendingOrdersCount = await StoreOrder.countDocuments({ status: "CHECKOUT" });
     const totalProductsCount = await Product.countDocuments();
-    
+
     // 2. Sales Over Last 30 Days
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    
+
     const dailySales = await StoreOrder.aggregate([
-      { 
-        $match: { 
-          status: "PAID",
+      {
+        $match: {
+          ...revenueStatuses,
           paidAt: { $gte: thirtyDaysAgo }
-        } 
+        }
       },
       {
         $group: {
@@ -528,7 +539,7 @@ export const getAnalytics = async (req, res) => {
 
     // 3. Top Products
     const topProducts = await StoreOrder.aggregate([
-      { $match: { status: "PAID" } },
+      { $match: revenueStatuses },
       { $unwind: "$items" },
       {
         $group: {
@@ -564,6 +575,67 @@ export const getAnalytics = async (req, res) => {
     });
   } catch (e) {
     logger.error("getAnalytics: FAILED", { error: e.message });
+    res.status(e.status || 500).json({ ok: false, error: e.message });
+  }
+};
+
+// --- Admin: All Orders (PAID + CHECKOUT) -----------------------------------------------
+
+export const getAllOrders = async (req, res) => {
+  logger.info("getAllOrders: START");
+  try {
+    assertAdmin(req);
+    const orders = await StoreOrder.find({ status: { $in: ["PAID", "CHECKOUT", "DISPATCHED", "COMPLETED"] } })
+      .populate("items.product")
+      .sort({ createdAt: -1 })
+      .lean();
+    logger.info("getAllOrders: SUCCESS", { count: orders.length });
+    res.json({ ok: true, total: orders.length, orders });
+  } catch (e) {
+    logger.error("getAllOrders: FAILED", { error: e.message });
+    res.status(e.status || 500).json({ ok: false, error: e.message });
+  }
+};
+
+// --- Admin: Update Order Status --------------------------------------------------------
+
+export const updateOrderStatus = async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  logger.info("updateOrderStatus: START", { orderId: id, status });
+  try {
+    assertAdmin(req);
+
+    const allowed = ["DISPATCHED", "COMPLETED"];
+    if (!allowed.includes(status)) {
+      return res.status(400).json({ ok: false, error: `Status must be one of: ${allowed.join(", ")}` });
+    }
+
+    const order = await StoreOrder.findById(id);
+    if (!order) {
+      return res.status(404).json({ ok: false, error: "Order not found" });
+    }
+
+    // ── Valid transitions ──────────────────────────────────────
+    const validTransitions = {
+      PAID: "DISPATCHED",
+      DISPATCHED: "COMPLETED",
+    };
+
+    if (validTransitions[order.status] !== status) {
+      return res.status(400).json({
+        ok: false,
+        error: `Cannot transition from ${order.status} to ${status}. Expected: ${validTransitions[order.status] || 'no transition available'}`
+      });
+    }
+
+    order.status = status;
+    await order.save();
+
+    logger.info("updateOrderStatus: SUCCESS", { orderId: id, status });
+    res.json({ ok: true, order });
+  } catch (e) {
+    logger.error("updateOrderStatus: FAILED", { error: e.message });
     res.status(e.status || 500).json({ ok: false, error: e.message });
   }
 };

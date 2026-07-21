@@ -22,21 +22,21 @@ export async function payhereBuildCheckoutForStore(req, res) {
       logger.warn("payhereBuildCheckoutForStore: Order not found", { orderRef });
       return res.status(404).json({ ok: false, error: "Order not found" });
     }
-    
+
     // We only allow building checkout for orders in CHECKOUT status (inventory already reserved)
     if (order.status !== "CHECKOUT") {
       logger.warn("payhereBuildCheckoutForStore: Invalid order status", { orderRef, status: order.status });
       return res.status(400).json({ ok: false, error: `Order status is ${order.status}, must be CHECKOUT` });
     }
 
-    const merchantId           = process.env.PAYHERE_SHOP_MERCHANT_ID;
+    const merchantId = process.env.PAYHERE_SHOP_MERCHANT_ID;
     const merchantSecret = process.env.PAYHERE_SHOP_MERCHANT_SECRET;
-    const sandbox        = process.env.PAYHERE_SHOP_SANDBOX;
-    const returnUrl      = process.env.PAYHERE_RETURN_URL;
-    const cancelUrl      = process.env.PAYHERE_CANCEL_URL;
-    const notifyUrl            = process.env.PAYHERE_NOTIFY_URL;
-    const checkoutUrl          = process.env.PAYHERE_CHECKOUT_URL;
-    const checkoutUrlSandbox   = process.env.PAYHERE_CHECKOUT_URL_SANDBOX;
+    const sandbox = process.env.PAYHERE_SHOP_SANDBOX;
+    const returnUrl = process.env.PAYHERE_RETURN_URL;
+    const cancelUrl = process.env.PAYHERE_CANCEL_URL;
+    const notifyUrl = process.env.PAYHERE_NOTIFY_URL;
+    const checkoutUrl = process.env.PAYHERE_CHECKOUT_URL;
+    const checkoutUrlSandbox = process.env.PAYHERE_CHECKOUT_URL_SANDBOX;
 
     if (!merchantId || !merchantSecret) {
       logger.error("payhereBuildCheckoutForStore: PayHere env not configured");
@@ -46,10 +46,10 @@ export async function payhereBuildCheckoutForStore(req, res) {
     const isSandbox = sandbox === "true";
     const actionUrl = isSandbox ? checkoutUrlSandbox : checkoutUrl;
 
-    const currency  = order.currency || "LKR";
+    const currency = order.currency || "LKR";
     const amountStr = formatAmount2(order.total);
     // Use the actual orderRef as order_id for consistency and easier tracking
-    const orderId   = order.orderRef;
+    const orderId = order.orderRef;
 
     const hash = buildCheckoutHash({
       merchantId,
@@ -64,7 +64,7 @@ export async function payhereBuildCheckoutForStore(req, res) {
 
     const payment = {
       // Internal use for frontend
-      _action_url: actionUrl, 
+      _action_url: actionUrl,
 
       merchant_id: merchantId,
       return_url: returnUrl,
@@ -78,22 +78,36 @@ export async function payhereBuildCheckoutForStore(req, res) {
       hash,
 
       first_name: c.firstName || "Customer",
-      last_name:  c.lastName  || "User",
-      email:      c.email     || "customer@example.com",
-      phone:      c.phone     || "0771234567",
-      address:    address     || "No Address Provided",
-      city:       c.city      || "Colombo",
-      country:    c.country   || "Sri Lanka",
+      last_name: c.lastName || "User",
+      email: c.email || "customer@example.com",
+      phone: c.phone || "0771234567",
+      address: address || "No Address Provided",
+      city: c.city || "Colombo",
+      country: c.country || "Sri Lanka",
 
       custom_1: "store",
       custom_2: String(order._id),
     };
 
-    logger.info("payhereBuildCheckoutForStore: SUCCESS", { 
-      orderRef, 
+    logger.info("payhereBuildCheckoutForStore: SUCCESS", {
+      orderRef,
       payhereOrderId: orderId,
-      amount: amountStr 
+      amount: amountStr
     });
+    console.log("========== PAYHERE DEBUG ==========");
+    console.log({
+      merchantId,
+      orderId,
+      amountStr,
+      currency,
+      hash,
+      returnUrl,
+      cancelUrl,
+      notifyUrl,
+      actionUrl,
+      custom2: String(order._id)
+    });
+    console.log("==================================");
     res.json({ ok: true, payment });
   } catch (e) {
     logger.error("payhereBuildCheckoutForStore: FAILED", { orderRef, error: e.message });
@@ -143,10 +157,10 @@ export async function payhereNotifyForStore(req, res) {
     });
 
     if (localSig !== md5sig) {
-      logger.warn("payhereNotifyForStore: signature verification failed", { 
-        orderId: order_id, 
-        receivedSig: md5sig, 
-        localSig 
+      logger.warn("payhereNotifyForStore: signature verification failed", {
+        orderId: order_id,
+        receivedSig: md5sig,
+        localSig
       });
       return res.status(400).send("INVALID");
     }
@@ -173,12 +187,12 @@ export async function payhereNotifyForStore(req, res) {
       await order.save();
       logger.info("payhereNotifyForStore: Order finalized", { orderRef: order.orderRef });
     } else {
-      logger.warn("payhereNotifyForStore: Non-success status code", { 
-        orderRef: order.orderRef, 
-        status: status_code, 
-        message: status_message 
+      logger.warn("payhereNotifyForStore: Non-success status code", {
+        orderRef: order.orderRef,
+        status: status_code,
+        message: status_message
       });
-      
+
       // If the order is still in CHECKOUT, mark it as FAILED.
       // We don't overwrite PAID or CANCELLED statuses.
       if (order.status === "CHECKOUT") {

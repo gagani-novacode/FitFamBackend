@@ -7,14 +7,22 @@ import rateLimit from "express-rate-limit";
 import { connectDB } from "../config/db.js";
 import v1Routes from "./routes/v1/index.js";
 import { notFound, errorHandler } from "./middleware/error.middleware.js";
-
+import path from 'path';
+import { fileURLToPath } from 'url';
 import crypto from "crypto";
 import logger from "./utils/logger.js";
 
-const app = express();
-
 import { setServers } from 'dns';
 setServers(['8.8.8.8', '8.8.4.4']);
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const app = express(); // ← app is now initialized first
+
+/* Static files */
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  next();
+}, express.static(path.join(__dirname, './uploads')));
 
 /* 0) Request ID Middleware */
 app.use((req, res, next) => {
@@ -26,7 +34,22 @@ app.use((req, res, next) => {
 app.set("trust proxy", 1);
 
 /* 2) Security */
-app.use(helmet());
+// REPLACE your current helmet config with this
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      connectSrc: ["'self'", "https://kangaroo-elude-reshape.ngrok-free.dev", "https://sandbox.payhere.lk", "https://qaapi.paykoko.com",],
+      imgSrc: ["'self'", "data:", "blob:", "https://images.unsplash.com", "https://*.unsplash.com", "http://localhost:8080", "https://kangaroo-elude-reshape.ngrok-free.dev"],
+      formAction: ["'self'", "https://sandbox.payhere.lk", "https://www.payhere.lk", "https://qaapi.paykoko.com",],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://qaapi.paykoko.com",],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      styleSrcElem: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"],
+    },
+  },
+}));
 
 /* 3) CORS */
 app.use(
@@ -74,8 +97,8 @@ app.use(
 );
 
 /* 7) Health checks */
-app.get("/", (req, res) =>
-  res.json({ ok: true, name: "Saraku API" })
+app.get("/api", (req, res) =>
+  res.json({ ok: true, name: "FitFam API" })
 );
 
 app.get("/health", (req, res) =>
@@ -89,6 +112,13 @@ app.get("/health", (req, res) =>
 
 /* 8) API routes */
 app.use("/api/v1", v1Routes);
+
+/* 8.5) Serve Vite frontend */
+app.use(express.static(path.join(__dirname, '../../FitFam/dist')));
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../../FitFam/dist', 'index.html'));
+});
 
 /* 9) Errors */
 app.use(notFound);

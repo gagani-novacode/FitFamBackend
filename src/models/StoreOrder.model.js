@@ -14,13 +14,13 @@ const LogItemSchema = new mongoose.Schema(
 const CustomerSchema = new mongoose.Schema(
   {
     firstName: { type: String, trim: true },
-    lastName:  { type: String, trim: true },
-    email:     { type: String, trim: true, lowercase: true },
-    phone:     { type: String, trim: true },
-    address:   { type: String, trim: true },
-    city:      { type: String, trim: true },
-    country:   { type: String, trim: true },
-    postalCode:{ type: String, trim: true },
+    lastName: { type: String, trim: true },
+    email: { type: String, trim: true, lowercase: true },
+    phone: { type: String, trim: true },
+    address: { type: String, trim: true },
+    city: { type: String, trim: true },
+    country: { type: String, trim: true },
+    postalCode: { type: String, trim: true },
   },
   { _id: false }
 );
@@ -30,8 +30,8 @@ const StoreOrderSchema = new mongoose.Schema(
     orderRef: { type: String, required: true, unique: true, index: true },
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // For logged-in users
     customer: { type: CustomerSchema, default: {} },
-    items:    { type: [LogItemSchema], default: [] },
-    total:    { type: Number, required: true, min: 0, default: 0 },
+    items: { type: [LogItemSchema], default: [] },
+    total: { type: Number, required: true, min: 0, default: 0 },
     currency: { type: String, default: "LKR" },
 
     // Lifecycle statuses:
@@ -41,15 +41,15 @@ const StoreOrderSchema = new mongoose.Schema(
     // FAILED: Payment failed
     // EXPIRED: Reserved inventory released after timeout
     // CANCELLED: Manually cancelled
-    status: { 
-      type: String, 
-      enum: ["CART", "CHECKOUT", "PAID", "FAILED", "CANCELLED", "EXPIRED"], 
-      default: "CART" 
+    status: {
+      type: String,
+      enum: ["CART", "CHECKOUT", "PAID", "DISPATCHED", "COMPLETED", "FAILED", "CANCELLED", "EXPIRED"],
+      default: "CART"
     },
-    
+
     checkoutAt: { type: Date },
     paidAt: { type: Date },
-    
+
     paymentMethod: { type: String },
     paymentId: { type: String },
   },
