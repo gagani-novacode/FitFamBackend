@@ -11,7 +11,7 @@ export function buildCheckoutHash({ merchantId, orderId, amountStr, currency, me
   const hashedSecret = CryptoJS.MD5(merchantSecret).toString().toUpperCase();
   const raw = merchantId + orderId + amountStr + currency + hashedSecret;
   const hash = CryptoJS.MD5(raw).toString().toUpperCase();
-  
+
   console.log("PayHere Hash (crypto-js) Raw Prefix:", merchantId + orderId + amountStr + currency);
   return hash;
 }

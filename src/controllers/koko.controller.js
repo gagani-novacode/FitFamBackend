@@ -3,7 +3,7 @@ import Product from "../models/Product.model.js";
 import StoreOrder from "../models/StoreOrder.model.js";
 import { signWithPrivateKey, verifyWithPublicKey } from "../utils/rsa.util.js";
 import { kokoOrderView } from "../utils/koko.client.js";
-import { markAsPaid } from "./store.controller.js"; 
+import { markAsPaid } from "./store.controller.js";
 import logger from "../utils/logger.js";
 
 // Helper for KOKO data string
@@ -41,6 +41,31 @@ export const prepareKokoCheckout = async (req, res) => {
     if (!order) {
       logger.warn("prepareKokoCheckout: Order not found", { orderRef });
       return res.status(404).json({ ok: false, error: "Order not found" });
+    }
+
+    // ── Check if Koko credentials are configured ──────────────────────
+    const hasCredentials =
+      process.env.KOKO_MERCHANT_ID &&
+      process.env.KOKO_API_KEY &&
+      process.env.KOKO_PRIVATE_KEY;
+
+    // ── If no credentials — return mock payload for dev/testing ───────
+    if (!hasCredentials) {
+      logger.warn("prepareKokoCheckout: No Koko credentials — returning mock payload");
+      return res.json({
+        ok: true,
+        mock: true,  // ← flag so frontend knows this is a mock
+        payment: {
+          _mId: "MOCK_MERCHANT",
+          _amount: (order.total || 0).toFixed(2),
+          _currency: order.currency || "LKR",
+          _orderId: order.orderRef,
+          _reference: order.orderRef,
+          _firstName: order.customer?.firstName || "",
+          _lastName: order.customer?.lastName || "",
+          _email: order.customer?.email || "",
+        }
+      });
     }
 
     const amount = (order.total || 0).toFixed(2);

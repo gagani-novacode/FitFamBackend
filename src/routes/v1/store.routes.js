@@ -15,6 +15,7 @@ import {
   moveToCheckout,
   markAsPaid,
   getOrderStatus,
+  getMyOrders,
   getPaidStoreOrders,
   getAnalytics,
   cleanupExpiredOrders,
@@ -147,6 +148,13 @@ r.get("/order/status/:orderRef",
   param("orderRef").isUUID().withMessage("Invalid orderRef"),
   validate,
   getOrderStatus
+);
+
+r.get("/orders/my",
+  limiter,
+  query("email").isEmail().withMessage("Valid email required"),
+  validate,
+  getMyOrders
 );
 
 // --- Admin (protected by assertAdmin inside each controller via x-admin-token header) ---

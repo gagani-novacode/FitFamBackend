@@ -462,6 +462,29 @@ export const getOrderStatus = async (req, res) => {
   }
 };
 
+export const getMyOrders = async (req, res) => {
+  const { email } = req.query;
+  logger.info("[storeController] :: getMyOrders() : Start", { email });
+  try {
+    if (!email) {
+      return res.status(400).json({ ok: false, error: "Email query param is required" });
+    }
+    const orders = await StoreOrder.find({
+      "customer.email": email.toLowerCase().trim(),
+      status: { $ne: "CART" }
+    })
+      .populate("items.product")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    logger.info("[storeController] :: getMyOrders() : Success", { count: orders.length });
+    res.json({ ok: true, count: orders.length, orders });
+  } catch (e) {
+    logger.error("[storeController] :: getMyOrders() : Failed", { email, error: e.message });
+    res.status(500).json({ ok: false, error: e.message });
+  }
+};
+
 // --- Internal Helper for Email ----------------------------------------------------------
 
 async function sendOrderPaidEmail(order) {

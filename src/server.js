@@ -40,8 +40,8 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      connectSrc: ["'self'", "https://kangaroo-elude-reshape.ngrok-free.dev", "https://sandbox.payhere.lk", "https://qaapi.paykoko.com",],
-      imgSrc: ["'self'", "data:", "blob:", "https://images.unsplash.com", "https://*.unsplash.com", "http://localhost:8080", "https://kangaroo-elude-reshape.ngrok-free.dev"],
+      connectSrc: ["'self'", "https://*.trycloudflare.com", "https://sandbox.payhere.lk", "https://qaapi.paykoko.com",],
+      imgSrc: ["'self'", "data:", "blob:", "https://images.unsplash.com", "https://*.unsplash.com", "http://localhost:8080", "https://*.trycloudflare.com"],
       formAction: ["'self'", "https://sandbox.payhere.lk", "https://www.payhere.lk", "https://qaapi.paykoko.com",],
       scriptSrc: ["'self'", "'unsafe-inline'", "https://qaapi.paykoko.com",],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
