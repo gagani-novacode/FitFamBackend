@@ -19,35 +19,8 @@ const transporter = nodemailer.createTransport({
   auth: { user: SMTP_USER, pass: SMTP_PASS },
 });
 
-/** Timing-safe comparison for Admin Token */
-const assertAdmin = (req) => {
-  const adminToken = process.env.ADMIN_TOKEN;
-  const providedToken = req.headers["x-admin-token"];
-
-  if (!adminToken || !providedToken) {
-    logger.warn("Admin access denied: Missing Credentials", { path: req.path });
-    const err = new Error("Unauthorized: Missing Credentials");
-    err.status = 401;
-    throw err;
-  }
-
-  try {
-    const bufA = Buffer.from(adminToken);
-    const bufB = Buffer.from(providedToken);
-
-    if (bufA.length !== bufB.length || !crypto.timingSafeEqual(bufA, bufB)) {
-      logger.warn("Admin access denied: Invalid Token", { path: req.path });
-      const err = new Error("Unauthorized: Invalid Admin Token");
-      err.status = 401;
-      throw err;
-    }
-  } catch (e) {
-    logger.error("Admin assertion error", { error: e.message });
-    const err = new Error("Unauthorized: Access Denied");
-    err.status = 401;
-    throw err;
-  }
-};
+// Note: Admin authentication is handled by the protect + admin middleware
+// on the router level (admin.routes.js). No controller-level check needed.
 
 /** Basic HTML escaping helper */
 const escapeHTML = (str) => {
@@ -74,7 +47,6 @@ const sendEmail = async (options) => {
 export const createProduct = async (req, res) => {
   logger.info("createProduct: START", { name: req.body.name });
   try {
-    assertAdmin(req);
     const {
       name, category, subCategory, price, originalPrice, description,
       sizes, stock, images, isNewProduct, isSale, badge, tags
@@ -112,7 +84,6 @@ export const updateProduct = async (req, res) => {
   const { id } = req.params;
   logger.info("updateProduct: START", { productId: id });
   try {
-    assertAdmin(req);
     const updates = { ...req.body };
     if (updates.name) updates.name = escapeHTML(updates.name);
     if (updates.description) updates.description = escapeHTML(updates.description);
@@ -135,7 +106,6 @@ export const patchProduct = async (req, res) => {
   const { id } = req.params;
   logger.info("patchProduct: START", { productId: id });
   try {
-    assertAdmin(req);
     const updates = { ...req.body };
     if (updates.name) updates.name = escapeHTML(updates.name);
     if (updates.description) updates.description = escapeHTML(updates.description);
@@ -508,7 +478,6 @@ async function sendOrderPaidEmail(order) {
 export const getPaidStoreOrders = async (req, res) => {
   logger.info("getPaidStoreOrders: START");
   try {
-    assertAdmin(req);
     const orders = await StoreOrder.find({ status: "PAID" })
       .populate("items.product")
       .sort({ createdAt: -1 })
@@ -524,8 +493,6 @@ export const getPaidStoreOrders = async (req, res) => {
 export const getAnalytics = async (req, res) => {
   logger.info("getAnalytics: START");
   try {
-    assertAdmin(req);
-
     // Statuses that count as "revenue generated"
     const revenueStatuses = { status: { $in: ["PAID", "DISPATCHED", "COMPLETED"] } };
 
@@ -607,7 +574,6 @@ export const getAnalytics = async (req, res) => {
 export const getAllOrders = async (req, res) => {
   logger.info("getAllOrders: START");
   try {
-    assertAdmin(req);
     const orders = await StoreOrder.find({ status: { $in: ["PAID", "CHECKOUT", "DISPATCHED", "COMPLETED"] } })
       .populate("items.product")
       .sort({ createdAt: -1 })
@@ -627,8 +593,6 @@ export const updateOrderStatus = async (req, res) => {
   const { status } = req.body;
   logger.info("updateOrderStatus: START", { orderId: id, status });
   try {
-    assertAdmin(req);
-
     const allowed = ["DISPATCHED", "COMPLETED"];
     if (!allowed.includes(status)) {
       return res.status(400).json({ ok: false, error: `Status must be one of: ${allowed.join(", ")}` });

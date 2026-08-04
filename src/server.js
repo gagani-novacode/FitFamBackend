@@ -1,7 +1,10 @@
-import "dotenv/config.js";
+import dotenv from "dotenv";
+import dotenvExpand from "dotenv-expand";
+dotenvExpand.expand(dotenv.config());
 import express from "express";
 import helmet from "helmet";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import rateLimit from "express-rate-limit";
 import { connectDB } from "../config/db.js";
@@ -52,16 +55,25 @@ app.use(helmet({
 }));
 
 /* 3) CORS */
+/* 3) CORS */
 app.use(
   cors({
-    origin: true,
-    credentials: false,
+    origin: [
+      "https://moments-bulk-complement-mustang.trycloudflare.com",
+      "https://slowly-desktops-conf-top.trycloudflare.com",
+      "http://localhost:3000",
+      "http://localhost:3001",
+    ],
+    credentials: true,
   })
 );
 
 /* 4) Body parsers */
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
+
+/* 4.5) Cookie parser — needed to read httpOnly refresh token cookies */
+app.use(cookieParser());
 
 /* 5) Access logs (Morgan + Winston) */
 app.use(
@@ -116,7 +128,8 @@ app.use("/api/v1", v1Routes);
 /* 8.5) Serve Vite frontend */
 app.use(express.static(path.join(__dirname, '../../FitFam/dist')));
 
-app.get('*', (req, res) => {
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) return next();
   res.sendFile(path.join(__dirname, '../../FitFam/dist', 'index.html'));
 });
 
