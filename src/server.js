@@ -55,15 +55,24 @@ app.use(helmet({
 }));
 
 /* 3) CORS */
-/* 3) CORS */
 app.use(
   cors({
-    origin: [
-      "https://moments-bulk-complement-mustang.trycloudflare.com",
-      "https://slowly-desktops-conf-top.trycloudflare.com",
-      "http://localhost:3000",
-      "http://localhost:3001",
-    ],
+    origin: (origin, callback) => {
+      const allowedOrigins = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+      ];
+
+      if (
+        !origin ||
+        allowedOrigins.includes(origin) ||
+        /^https:\/\/.*\.trycloudflare\.com$/.test(origin)
+      ) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS blocked: ${origin}`));
+      }
+    },
     credentials: true,
   })
 );

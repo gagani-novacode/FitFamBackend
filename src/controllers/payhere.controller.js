@@ -4,10 +4,6 @@ import { formatAmount2, buildCheckoutHash, buildMd5Sig } from "../utils/payhere.
 import { markAsPaid } from "./store.controller.js";
 import logger from "../utils/logger.js";
 
-/**
- * Build PayHere checkout payload for a Store order (status=CHECKOUT).
- * POST body: { orderRef: string }
- */
 export async function payhereBuildCheckoutForStore(req, res) {
   const { orderRef } = req.body || {};
   logger.info("payhereBuildCheckoutForStore: START", { orderRef });
@@ -23,7 +19,6 @@ export async function payhereBuildCheckoutForStore(req, res) {
       return res.status(404).json({ ok: false, error: "Order not found" });
     }
 
-    // We only allow building checkout for orders in CHECKOUT status (inventory already reserved)
     if (order.status !== "CHECKOUT") {
       logger.warn("payhereBuildCheckoutForStore: Invalid order status", { orderRef, status: order.status });
       return res.status(400).json({ ok: false, error: `Order status is ${order.status}, must be CHECKOUT` });
@@ -47,14 +42,15 @@ export async function payhereBuildCheckoutForStore(req, res) {
     const actionUrl = isSandbox ? checkoutUrlSandbox : checkoutUrl;
 
     const currency = order.currency || "LKR";
-    const amountStr = formatAmount2(order.total);
-    // Use the actual orderRef as order_id for consistency and easier tracking
     const orderId = order.orderRef;
+
+    // ✅ Format first, then pass as amountStr — identical to working project
+    const amountStr = formatAmount2(order.total);
 
     const hash = buildCheckoutHash({
       merchantId,
       orderId,
-      amountStr,
+      amountStr,      // ✅ pre-formatted string, matches util param name
       currency,
       merchantSecret,
     });
@@ -63,7 +59,6 @@ export async function payhereBuildCheckoutForStore(req, res) {
     const address = [c.address, c.city, c.postalCode].filter(Boolean).join(", ");
 
     const payment = {
-      // Internal use for frontend
       _action_url: actionUrl,
 
       merchant_id: merchantId,
@@ -92,22 +87,8 @@ export async function payhereBuildCheckoutForStore(req, res) {
     logger.info("payhereBuildCheckoutForStore: SUCCESS", {
       orderRef,
       payhereOrderId: orderId,
-      amount: amountStr
+      amount: amountStr,
     });
-    console.log("========== PAYHERE DEBUG ==========");
-    console.log({
-      merchantId,
-      orderId,
-      amountStr,
-      currency,
-      hash,
-      returnUrl,
-      cancelUrl,
-      notifyUrl,
-      actionUrl,
-      custom2: String(order._id)
-    });
-    console.log("==================================");
     res.json({ ok: true, payment });
   } catch (e) {
     logger.error("payhereBuildCheckoutForStore: FAILED", { orderRef, error: e.message });
@@ -115,10 +96,6 @@ export async function payhereBuildCheckoutForStore(req, res) {
   }
 }
 
-/**
- * PayHere notify (server-to-server). Content-Type: application/x-www-form-urlencoded
- * Verifies md5sig + status_code===2, then marks order PAID and decrements inventory atomically.
- */
 export async function payhereNotifyForStore(req, res) {
   const {
     merchant_id,
@@ -130,10 +107,9 @@ export async function payhereNotifyForStore(req, res) {
     md5sig,
     method,
     status_message,
-    custom_1,
     custom_2,
   } = req.body || {};
-  logger.info("payhereNotifyForStore: START", { orderId: order_id, paymentId: payment_id, statusCode: status_code });
+  logger.info("payhereNotifyForStore: START", { orderId: order_id, statusCode: status_code });
 
   try {
     if (!merchant_id || !order_id || !payhere_amount || !payhere_currency || typeof status_code === "undefined" || !md5sig) {
@@ -157,11 +133,7 @@ export async function payhereNotifyForStore(req, res) {
     });
 
     if (localSig !== md5sig) {
-      logger.warn("payhereNotifyForStore: signature verification failed", {
-        orderId: order_id,
-        receivedSig: md5sig,
-        localSig
-      });
+      logger.warn("payhereNotifyForStore: signature mismatch", { orderId: order_id });
       return res.status(400).send("INVALID");
     }
 
@@ -169,36 +141,26 @@ export async function payhereNotifyForStore(req, res) {
     if (custom_2 && mongoose.isValidObjectId(custom_2)) {
       order = await StoreOrder.findById(custom_2);
     } else {
-      // Fallback to orderRef if custom_2 is missing (though our buildCheckoutForStore always sends it)
       order = await StoreOrder.findOne({ orderRef: order_id });
     }
 
     if (!order) {
-      logger.warn("payhereNotifyForStore: Order not found", { orderId: order_id, custom_2 });
-      return res.status(200).send("OK"); // Still return OK to PayHere to stop retries
+      logger.warn("payhereNotifyForStore: Order not found", { orderId: order_id });
+      return res.status(200).send("OK");
     }
 
     if (String(status_code) === "2") {
-      logger.info("payhereNotifyForStore: SUCCESS - marking as paid", { orderRef: order.orderRef, paymentId: payment_id });
       order.status = "PAID";
       order.paidAt = new Date();
       order.paymentMethod = method || "PAYHERE";
       order.paymentId = payment_id;
       await order.save();
-      logger.info("payhereNotifyForStore: Order finalized", { orderRef: order.orderRef });
+      logger.info("payhereNotifyForStore: Order marked PAID", { orderRef: order.orderRef });
     } else {
-      logger.warn("payhereNotifyForStore: Non-success status code", {
-        orderRef: order.orderRef,
-        status: status_code,
-        message: status_message
-      });
-
-      // If the order is still in CHECKOUT, mark it as FAILED.
-      // We don't overwrite PAID or CANCELLED statuses.
+      logger.warn("payhereNotifyForStore: Non-success status", { orderRef: order.orderRef, status: status_code });
       if (order.status === "CHECKOUT") {
         order.status = "FAILED";
         await order.save();
-        logger.info("payhereNotifyForStore: Order marked as FAILED", { orderRef: order.orderRef });
       }
     }
 
