@@ -1,23 +1,33 @@
-import crypto from "crypto";
+//import crypto from "crypto";
 import mongoose from "mongoose";
 import Product from "../models/Product.model.js";
 import StoreOrder from "../models/StoreOrder.model.js";
+import Discount from "../models/Discount.model.js";
+import Sale from "../models/Sale.model.js";
 import logger from "../utils/logger.js";
 import nodemailer from "nodemailer";
 
 // --- Config & Helpers --------------------------------------------------------------------
-const SMTP_HOST = process.env.SMTP_HOST;
-const SMTP_PORT = Number(process.env.SMTP_PORT || 465);
-const SMTP_USER = process.env.SMTP_USER;
-const SMTP_PASS = process.env.SMTP_PASS;
-const FROM_EMAIL = process.env.FROM_EMAIL || 'Saraku Store <store@saraku.com>';
 
-const transporter = nodemailer.createTransport({
-  host: SMTP_HOST,
-  port: SMTP_PORT,
-  secure: SMTP_PORT === 465,
-  auth: { user: SMTP_USER, pass: SMTP_PASS },
-});
+let _transporter = null;
+function getTransporter() {
+  if (!_transporter) {
+    _transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT || 587),
+      secure: Number(process.env.SMTP_PORT) === 465,
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+    _transporter.verify((err, ok) => {
+      if (err) console.error("❌ SMTP verify failed:", err.message);
+      else console.log("✅ SMTP ready");
+    });
+  }
+  return _transporter;
+}
 
 // Note: Admin authentication is handled by the protect + admin middleware
 // on the router level (admin.routes.js). No controller-level check needed.
@@ -31,12 +41,14 @@ const escapeHTML = (str) => {
 };
 
 const sendEmail = async (options) => {
+  if (!options.from) options.from = process.env.FROM_EMAIL || 'Saraku Store <store@saraku.com>';
   logger.info("Initiating email send", { to: options.to, subject: options.subject });
   try {
-    const info = await transporter.sendMail(options);
+    const info = await getTransporter().sendMail(options);
     logger.info("Email sent successfully", { messageId: info.messageId, to: options.to });
     return true;
   } catch (err) {
+    console.error("sendEmail utility threw an error:", err);
     logger.error("Failed to send email", { error: err.message, to: options.to });
     return false;
   }
@@ -126,17 +138,44 @@ export const patchProduct = async (req, res) => {
 
 // --- Store Public Endpoints -------------------------------------------------------------
 
+// Helper: get active sale (cached per request is fine; DB is fast)
+const getActiveSaleDoc = async () => {
+  const now = new Date();
+  return Sale.findOne({ isActive: true, startDate: { $lte: now }, endDate: { $gte: now } });
+};
+
 export const listProducts = async (req, res) => {
   const C = "[storeController]";
   logger.info(`${C} :: listProducts() : Start`);
   try {
-    const { category, subCategory } = req.query;
-    const filter = {};
-    if (category) filter.category = category;
-    if (subCategory) filter.subCategory = subCategory;
     const products = await Product.find().lean();
-    logger.info(`${C} :: listProducts() : End`);
-    res.json({ ok: true, products });
+
+    // Attach sale pricing if an active sale exists
+    const activeSale = await getActiveSaleDoc();
+    const enriched = products.map((p) => {
+      if (!activeSale) return p;
+      const productIdStr = p._id.toString();
+      const discountAmt = activeSale.products.get
+        ? activeSale.products.get(productIdStr)
+        : activeSale.products[productIdStr];
+
+      if (discountAmt && discountAmt > 0) {
+        const salePrice = Math.max(0, p.price - discountAmt);
+        return {
+          ...p,
+          salePrice,
+          saleDiscountAmount: discountAmt,
+          saleId: activeSale._id,
+          saleName: activeSale.name,
+          isSale: true,
+          originalPrice: p.price,
+        };
+      }
+      return p;
+    });
+
+    logger.info(`${C} :: listProducts() : End | ${enriched.length} products`);
+    res.json({ ok: true, products: enriched });
   } catch (e) {
     logger.error(`${C} :: listProducts() : Failed | ${e.message}`);
     res.status(500).json({ ok: false, error: e.message });
@@ -170,7 +209,7 @@ export const getCart = async (req, res) => {
   try {
     if (!orderRef) {
       const newRef = crypto.randomUUID();
-      const cart = await StoreOrder.create({ orderRef: newRef, status: "CART" });
+      const cart = await StoreOrder.create({ status: "CART" });
       logger.info(`${C} :: getCart() : End | New Cart`);
       return res.json({ ok: true, cart });
     }
@@ -187,6 +226,18 @@ export const getCart = async (req, res) => {
   }
 };
 
+const recalculateCartTotal = (cart) => {
+  const subtotal = cart.items.reduce((acc, it) => acc + it.lineTotal, 0);
+  const delivery = cart.items.length > 0 ? 500 : 0;
+  
+  cart.discountAmount = 0;
+  if (cart.discountPercentage && cart.discountPercentage > 0) {
+    cart.discountAmount = Math.round(subtotal * (cart.discountPercentage / 100));
+  }
+  
+  cart.total = subtotal - cart.discountAmount + delivery;
+};
+
 export const addToCart = async (req, res) => {
   const C = "[storeController]";
   const { orderRef, productId, size, qty = 1 } = req.body;
@@ -201,9 +252,21 @@ export const addToCart = async (req, res) => {
       return res.status(404).json({ ok: false, error: "Product not found" });
     }
 
+    // Determine effective unit price (apply sale if active)
+    let unitPrice = product.price;
+    const activeSale = await getActiveSaleDoc();
+    if (activeSale) {
+      const discountAmt = activeSale.products.get
+        ? activeSale.products.get(productId.toString())
+        : activeSale.products[productId.toString()];
+      if (discountAmt && discountAmt > 0) {
+        unitPrice = Math.max(0, product.price - discountAmt);
+      }
+    }
+
     let cart = await StoreOrder.findOne({ orderRef, status: "CART" });
     if (!cart) {
-      cart = await StoreOrder.create({ orderRef: orderRef || crypto.randomUUID(), status: "CART" });
+      cart = await StoreOrder.create({ status: "CART" });
     }
 
     const itemIndex = cart.items.findIndex(it => it.product.toString() === productId && it.size === size);
@@ -215,12 +278,12 @@ export const addToCart = async (req, res) => {
         product: productId,
         size: size,
         qty: Math.max(1, Number(qty)),
-        unitPrice: product.price,
-        lineTotal: product.price * Math.max(1, Number(qty))
+        unitPrice,
+        lineTotal: unitPrice * Math.max(1, Number(qty))
       });
     }
 
-    cart.total = cart.items.reduce((acc, it) => acc + it.lineTotal, 0) + 400;
+    recalculateCartTotal(cart);
     await cart.save();
 
     logger.info(`${C} :: addToCart() : End`);
@@ -242,7 +305,7 @@ export const removeFromCart = async (req, res) => {
     }
 
     cart.items = cart.items.filter(it => !(it.product.toString() === productId && it.size === size));
-    cart.total = cart.items.reduce((acc, it) => acc + it.lineTotal, 0) + (cart.items.length > 0 ? 400 : 0);
+    recalculateCartTotal(cart);
     await cart.save();
 
     logger.info(`${C} :: removeFromCart() : End`);
@@ -276,13 +339,88 @@ export const updateCartQty = async (req, res) => {
       cart.items[itemIndex].lineTotal = cart.items[itemIndex].unitPrice * newQty;
     }
 
-    cart.total = cart.items.reduce((acc, it) => acc + it.lineTotal, 0) + (cart.items.length > 0 ? 400 : 0);
+    recalculateCartTotal(cart);
     await cart.save();
 
     logger.info(`${C} :: updateCartQty() : End`);
     res.json({ ok: true, cart });
   } catch (e) {
     logger.error(`${C} :: updateCartQty() : Failed | ${e.message}`);
+    res.status(400).json({ ok: false, error: e.message });
+  }
+};
+
+export const validateDiscount = async (req, res) => {
+  const { code } = req.params;
+  try {
+    const uppercaseCode = code.trim().toUpperCase();
+    const discount = await Discount.findOne({ code: uppercaseCode });
+    if (!discount || !discount.isActive) {
+      return res.status(404).json({ ok: false, error: "Invalid or inactive discount code" });
+    }
+    res.json({ ok: true, percentage: discount.percentage });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+};
+
+export const applyDiscount = async (req, res) => {
+  const C = "[storeController]";
+  const { orderRef, code } = req.body;
+  logger.info(`${C} :: applyDiscount() : Start`);
+  try {
+    if (!code) {
+      return res.status(400).json({ ok: false, error: "Discount code is required" });
+    }
+
+    const cart = await StoreOrder.findOne({ orderRef, status: "CART" });
+    if (!cart) {
+      return res.status(404).json({ ok: false, error: "Cart not found" });
+    }
+
+    const uppercaseCode = code.trim().toUpperCase();
+    const discount = await Discount.findOne({ code: uppercaseCode });
+
+    if (!discount) {
+      return res.status(404).json({ ok: false, error: "Invalid discount code" });
+    }
+    if (!discount.isActive) {
+      return res.status(400).json({ ok: false, error: "Discount code is no longer active" });
+    }
+
+    cart.discountCode = uppercaseCode;
+    cart.discountPercentage = discount.percentage;
+    recalculateCartTotal(cart);
+    await cart.save();
+
+    logger.info(`${C} :: applyDiscount() : End`);
+    res.json({ ok: true, cart });
+  } catch (e) {
+    logger.error(`${C} :: applyDiscount() : Failed | ${e.message}`);
+    res.status(400).json({ ok: false, error: e.message });
+  }
+};
+
+export const removeDiscount = async (req, res) => {
+  const C = "[storeController]";
+  const { orderRef } = req.body;
+  logger.info(`${C} :: removeDiscount() : Start`);
+  try {
+    const cart = await StoreOrder.findOne({ orderRef, status: "CART" });
+    if (!cart) {
+      return res.status(404).json({ ok: false, error: "Cart not found" });
+    }
+
+    cart.discountCode = undefined;
+    cart.discountPercentage = 0;
+    cart.discountAmount = 0;
+    recalculateCartTotal(cart);
+    await cart.save();
+
+    logger.info(`${C} :: removeDiscount() : End`);
+    res.json({ ok: true, cart });
+  } catch (e) {
+    logger.error(`${C} :: removeDiscount() : Failed | ${e.message}`);
     res.status(400).json({ ok: false, error: e.message });
   }
 };
@@ -350,7 +488,7 @@ export const markAsPaid = async (req, res) => {
   const { orderRef, paymentDetails } = req.body;
   logger.info(`${C} :: markAsPaid() : Start`);
   try {
-    const order = await StoreOrder.findOne({ orderRef, status: "CHECKOUT" });
+    const order = await StoreOrder.findOne({ orderRef, status: "CHECKOUT" }).populate("items.product");
     if (!order) {
       logger.warn(`${C} :: markAsPaid() : Failed | Order not found | ${orderRef}`);
       return res.status(404).json({ ok: false, error: "Order not found in checkout state" });
@@ -459,16 +597,164 @@ export const getMyOrders = async (req, res) => {
 
 async function sendOrderPaidEmail(order) {
   const customerName = escapeHTML(order.customer.firstName);
+  const orderRef = escapeHTML(order.orderRef);
+  const totalAmount = order.total || 0;
+  const deliveryFee = 500;
+  const subtotal = order.items.reduce((acc, it) => acc + (it.unitPrice * it.qty), 0);
+  const discountAmount = order.discountAmount || 0;
+  const discountPercentage = order.discountPercentage || 0;
+  const discountCode = order.discountCode || '';
+
+  const discountRow = discountAmount > 0 ? `
+    <tr>
+      <td style="padding: 6px 0; font-size: 13px; color: #555555;">Discount (${discountPercentage}% - ${escapeHTML(discountCode)})</td>
+      <td align="right" style="padding: 6px 0; font-size: 13px; color: #E5003B;">- LKR ${discountAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+    </tr>
+  ` : '';
+
+  // Build items rows
+  const itemRows = order.items.map(item => {
+    const name = escapeHTML(item.product?.name || 'Active Wear Product');
+    const size = escapeHTML(item.size || 'M');
+    const qty = item.qty || 1;
+    const price = item.unitPrice || 0;
+    const lineTotal = price * qty;
+
+    return `
+      <tr>
+        <td style="padding: 12px 0; border-bottom: 1px solid #eeeeee; font-size: 14px; color: #111111; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
+          <div style="font-weight: 600;">${name}</div>
+          <div style="font-size: 11px; color: #888888; margin-top: 2px; text-transform: uppercase; letter-spacing: 1px;">Size: ${size}</div>
+        </td>
+        <td style="padding: 12px 0; border-bottom: 1px solid #eeeeee; font-size: 14px; color: #555555; text-align: center; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
+          ${qty}
+        </td>
+        <td style="padding: 12px 0; border-bottom: 1px solid #eeeeee; font-size: 14px; color: #111111; text-align: right; font-weight: 600; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
+          LKR ${lineTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+        </td>
+      </tr>
+    `;
+  }).join('');
+
   const html = `
-    <h1 style="color: #1f2937">Thank you for your order, ${customerName}!</h1>
-    <p>Order Ref: <strong>${escapeHTML(order.orderRef)}</strong></p>
-    <p>Total: <strong>LKR ${order.total.toLocaleString()}</strong></p>
-    <p>Status: <span style="color: green; font-weight: bold;">PAID</span></p>
-    <p>We will notify you once your items are dispatched.</p>
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Order Confirmed</title>
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #f6f6f6; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased;">
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f6f6f6; padding: 40px 10px;">
+        <tr>
+          <td align="center">
+            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #ffffff; border: 1px solid #e9e9e9; box-shadow: 0 4px 12px rgba(0,0,0,0.03);">
+              
+              <!-- Header -->
+              <tr>
+                <td style="background-color: #111111; padding: 40px 20px; text-align: center;">
+                  <div style="font-size: 24px; font-weight: 700; color: #ffffff; letter-spacing: 6px; text-transform: uppercase; margin-bottom: 5px;">FITFAM</div>
+                  <div style="font-size: 9px; font-weight: 400; color: #888888; letter-spacing: 8px; text-transform: uppercase;">Active Premium</div>
+                </td>
+              </tr>
+
+              <!-- Body -->
+              <tr>
+                <td style="padding: 40px 30px;">
+                  <h1 style="font-size: 20px; font-weight: 400; color: #111111; margin-top: 0; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 2px;">Order Confirmed</h1>
+                  <p style="font-size: 14px; line-height: 1.6; color: #555555; margin-bottom: 30px;">
+                    Hi ${customerName},<br>
+                    Thank you for shopping with FitFam Active. Your payment was successful, and we've received your order. We are now preparing it for shipment.
+                  </p>
+
+                  <!-- Order Summary -->
+                  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="border-bottom: 2px solid #111111; padding-bottom: 8px; margin-bottom: 15px;">
+  <tr>
+    <td style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; color: #111111;">
+      Order Details
+    </td>
+    <td align="right" style="font-size: 11px; color: #888888; white-space: nowrap;">
+      Ref: ${orderRef}
+    </td>
+  </tr>
+</table>
+
+                  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: 25px;">
+                    <thead>
+                      <tr>
+                        <th align="left" style="font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #888888; padding-bottom: 8px; border-bottom: 1px solid #111111;">Item</th>
+                        <th align="center" style="font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #888888; padding-bottom: 8px; border-bottom: 1px solid #111111; width: 60px;">Qty</th>
+                        <th align="right" style="font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: #888888; padding-bottom: 8px; border-bottom: 1px solid #111111; width: 120px;">Price</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${itemRows}
+                    </tbody>
+                  </table>
+
+                  <!-- Totals -->
+                  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-top: 20px; margin-bottom: 30px;">
+                    <tr>
+                      <td style="padding: 6px 0; font-size: 13px; color: #555555;">Subtotal</td>
+                      <td align="right" style="padding: 6px 0; font-size: 13px; color: #111111;">LKR ${subtotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                    </tr>
+                    ${discountRow}
+                    <tr>
+                      <td style="padding: 6px 0; font-size: 13px; color: #555555;">Delivery</td>
+                      <td align="right" style="padding: 6px 0; font-size: 13px; color: #111111;">LKR ${deliveryFee.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                    </tr>
+                    <tr style="font-weight: 700; font-size: 16px;">
+                      <td style="padding: 15px 0 0 0; border-top: 1px dashed #dddddd; color: #111111; text-transform: uppercase; letter-spacing: 1px;">Total</td>
+                      <td align="right" style="padding: 15px 0 0 0; border-top: 1px dashed #dddddd; color: #D4AF37; font-size: 18px;">LKR ${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                    </tr>
+                  </table>
+
+                  <!-- Delivery Address -->
+                  <div style="background-color: #fcfcfc; border: 1px solid #eeeeee; padding: 20px; margin-bottom: 30px;">
+                    <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: #111111; margin-bottom: 8px;">Delivery Address</div>
+                    <div style="font-size: 13px; line-height: 1.5; color: #555555;">
+                      ${escapeHTML(order.customer.address)}<br>
+                      ${escapeHTML(order.customer.city)}, ${escapeHTML(order.customer.postalCode || '')}<br>
+                      ${escapeHTML(order.customer.country)}<br>
+                      <span style="font-size: 12px; color: #888888;">Phone: ${escapeHTML(order.customer.phone)}</span>
+                    </div>
+                  </div>
+
+                  <!-- Button -->
+                  <table border="0" cellpadding="0" cellspacing="0" width="100%">
+                    <tr>
+                      <td align="center">
+                        <a href="https://frost-simpson-choose-annotated.trycloudflare.com/account" style="display: inline-block; background-color: #111111; color: #ffffff; text-decoration: none; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; padding: 15px 30px; border: 2px solid #111111; transition: all 0.3s ease;">Track Your Order</a>
+                      </td>
+                    </tr>
+                  </table>
+
+                </td>
+              </tr>
+
+              <!-- Footer -->
+              <tr>
+                <td style="background-color: #fafafa; padding: 30px; border-top: 1px solid #eeeeee; text-align: center;">
+                  <p style="font-size: 12px; color: #888888; margin: 0 0 10px 0;">
+                    Need help? Contact our support team at <a href="mailto:support@fitfam.com" style="color: #111111; text-decoration: underline;">support@fitfam.com</a>
+                  </p>
+                  <p style="font-size: 11px; color: #aaaaaa; margin: 0; text-transform: uppercase; letter-spacing: 1px;">
+                    &copy; 2026 FITFAM ACTIVE. ALL RIGHTS RESERVED.
+                  </p>
+                </td>
+              </tr>
+
+            </table>
+          </td>
+        </tr>
+      </table>
+    </body>
+    </html>
   `;
+
   return sendEmail({
     to: order.customer.email,
-    subject: `Saraku Order Confirmed: ${order.orderRef}`,
+    subject: `FitFam Active Order Confirmed: ${order.orderRef}`,
     html
   });
 }

@@ -85,7 +85,35 @@ r.patch("/orders/:id/status",
 r.get("/analytics", adminLimiter, getAnalytics);
 r.post("/cleanup-expired", adminLimiter, cleanupExpiredOrders);
 
+import {
+    createDiscount,
+    getDiscounts,
+    toggleDiscount,
+    deleteDiscount
+} from "../../controllers/discount.controller.js";
+
+// --- Discounts ---
+r.get("/discounts", adminLimiter, getDiscounts);
+r.post("/discounts", adminLimiter, validate, createDiscount);
+r.put("/discounts/:id/toggle", adminLimiter, validate, toggleDiscount);
+r.delete("/discounts/:id", adminLimiter, validate, deleteDiscount);
+
 // --- Uploads ---
 r.post("/upload-image", adminLimiter, upload.single("image"), handleImageUpload);
+
+import {
+    getSales,
+    getSaleById,
+    createSale,
+    updateSale,
+    deleteSale,
+} from "../../controllers/sale.controller.js";
+
+// --- Sales ---
+r.get("/sales", adminLimiter, getSales);
+r.get("/sales/:id", adminLimiter, getSaleById);
+r.post("/sales", adminLimiter, createSale);
+r.put("/sales/:id", adminLimiter, updateSale);
+r.delete("/sales/:id", adminLimiter, deleteSale);
 
 export default r;

@@ -13,6 +13,9 @@ import {
   markAsPaid,
   getOrderStatus,
   getMyOrders,
+  applyDiscount,
+  removeDiscount,
+  validateDiscount,
 } from "../../controllers/store.controller.js";
 import { validationResult } from "express-validator";
 
@@ -47,14 +50,14 @@ r.get("/products/:id",
 
 // --- Cart ---
 r.get("/cart",
-  query("orderRef").optional({ checkFalsy: true }).isUUID().withMessage("Invalid orderRef"),
+  query("orderRef").optional({ checkFalsy: true }).matches(/^[A-Z]+-\d{8}-[0-9A-F]{4}$/).withMessage("Invalid orderRef"),
   validate,
   getCart
 );
 
 r.post("/cart/add",
   limiter,
-  body("orderRef").isUUID().withMessage("Invalid orderRef"),
+  body("orderRef").matches(/^[A-Z]+-\d{8}-[0-9A-F]{4}$/).withMessage("Invalid orderRef"),
   body("productId").isMongoId().withMessage("Invalid Product ID"),
   body("qty").optional().isInt({ min: 1 }).withMessage("Qty must be at least 1"),
   validate,
@@ -63,7 +66,7 @@ r.post("/cart/add",
 
 r.post("/cart/remove",
   limiter,
-  body("orderRef").isUUID().withMessage("Invalid orderRef"),
+  body("orderRef").matches(/^[A-Z]+-\d{8}-[0-9A-F]{4}$/).withMessage("Invalid orderRef"),
   body("productId").isMongoId().withMessage("Invalid Product ID"),
   validate,
   removeFromCart
@@ -71,7 +74,7 @@ r.post("/cart/remove",
 
 r.post("/cart/update",
   limiter,
-  body("orderRef").isUUID().withMessage("Invalid orderRef"),
+  body("orderRef").matches(/^[A-Z]+-\d{8}-[0-9A-F]{4}$/).withMessage("Invalid orderRef"),
   body("productId").isMongoId().withMessage("Invalid Product ID"),
   body("qty").isInt({ min: 0 }).withMessage("Qty must be 0 or more"),
   validate,
@@ -79,9 +82,30 @@ r.post("/cart/update",
 );
 
 // --- Checkout & Payment ---
+r.get("/cart/discount/validate/:code",
+  limiter,
+  param("code").trim().notEmpty().withMessage("Code is required"),
+  validate,
+  validateDiscount
+);
+r.post("/cart/discount/apply",
+  limiter,
+  body("orderRef").matches(/^[A-Z]+-\d{8}-[0-9A-F]{4}$/).withMessage("Invalid orderRef"),
+  body("code").trim().notEmpty().withMessage("Discount code is required"),
+  validate,
+  applyDiscount
+);
+
+r.post("/cart/discount/remove",
+  limiter,
+  body("orderRef").matches(/^[A-Z]+-\d{8}-[0-9A-F]{4}$/).withMessage("Invalid orderRef"),
+  validate,
+  removeDiscount
+);
+
 r.post("/checkout",
   limiter,
-  body("orderRef").isUUID().withMessage("Invalid orderRef"),
+  body("orderRef").matches(/^[A-Z]+-\d{8}-[0-9A-F]{4}$/).withMessage("Invalid orderRef"),
   body("customer.email").isEmail().withMessage("Valid email required"),
   body("customer.firstName").trim().notEmpty().withMessage("First name is required"),
   body("customer.phone").trim().notEmpty().withMessage("Phone is required"),
@@ -91,7 +115,7 @@ r.post("/checkout",
 
 r.post("/payment/confirm",
   limiter,
-  body("orderRef").isUUID().withMessage("Invalid orderRef"),
+  body("orderRef").matches(/^[A-Z]+-\d{8}-[0-9A-F]{4}$/).withMessage("Invalid orderRef"),
   body("paymentDetails.method").notEmpty().withMessage("Payment method required"),
   body("paymentDetails.id").notEmpty().withMessage("Payment ID required"),
   validate,
@@ -100,7 +124,7 @@ r.post("/payment/confirm",
 
 r.get("/order/status/:orderRef",
   limiter,
-  param("orderRef").isUUID().withMessage("Invalid orderRef"),
+  param("orderRef").matches(/^[A-Z]+-\d{8}-[0-9A-F]{4}$/).withMessage("Invalid orderRef"),
   validate,
   getOrderStatus
 );
@@ -111,5 +135,9 @@ r.get("/orders/my",
   validate,
   getMyOrders
 );
+
+// --- Sales (public) ---
+import { getActiveSale } from "../../controllers/sale.controller.js";
+r.get("/sales/active", limiter, getActiveSale);
 
 export default r;
