@@ -14,6 +14,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import crypto from "crypto";
 import logger from "./utils/logger.js";
+import uploadRouter from './routes/v1/upload.js';
 
 import { setServers } from 'dns';
 setServers(['8.8.8.8', '8.8.4.4']);
@@ -133,6 +134,8 @@ app.get("/health", (req, res) =>
 
 /* 8) API routes */
 app.use("/api/v1", v1Routes);
+
+app.use('/api/upload', uploadRouter);
 
 /* 8.5) Serve Vite frontend */
 app.use(express.static(path.join(__dirname, '../../FitFam/dist')));
