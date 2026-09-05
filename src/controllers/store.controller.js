@@ -6,6 +6,7 @@ import Discount from "../models/Discount.model.js";
 import Sale from "../models/Sale.model.js";
 import logger from "../utils/logger.js";
 import nodemailer from "nodemailer";
+import { processCustomerQR } from "../utils/qrcode.util.js";
 
 // --- Config & Helpers --------------------------------------------------------------------
 
@@ -596,6 +597,13 @@ export const getMyOrders = async (req, res) => {
 // --- Internal Helper for Email ----------------------------------------------------------
 
 async function sendOrderPaidEmail(order) {
+  let qrDataURL = "";
+  try {
+    qrDataURL = await processCustomerQR(order.customer);
+  } catch (err) {
+    logger.error("Failed to process customer QR code for email", { error: err.message });
+  }
+
   const customerName = escapeHTML(order.customer.firstName);
   const orderRef = escapeHTML(order.orderRef);
   const totalAmount = order.total || 0;
@@ -720,6 +728,15 @@ async function sendOrderPaidEmail(order) {
                     </div>
                   </div>
 
+                  <!-- Customer QR Code -->
+                  ${qrDataURL ? `
+                  <div style="text-align: center; margin-bottom: 30px;">
+                    <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: #111111; margin-bottom: 15px;">Your Customer ID</div>
+                    <img src="cid:customer-qr" alt="Customer QR Code" style="border: 2px solid #111111; padding: 10px; background: #fff;" />
+                    <div style="font-size: 11px; color: #888888; margin-top: 10px;">Show this at our store for quick access!</div>
+                  </div>
+                  ` : ''}
+
                   <!-- Button -->
                   <table border="0" cellpadding="0" cellspacing="0" width="100%">
                     <tr>
@@ -752,11 +769,24 @@ async function sendOrderPaidEmail(order) {
     </html>
   `;
 
-  return sendEmail({
+  const mailOptions = {
     to: order.customer.email,
     subject: `FitFam Active Order Confirmed: ${order.orderRef}`,
-    html
-  });
+    html,
+    attachments: []
+  };
+
+  if (qrDataURL) {
+    const base64Data = qrDataURL.replace(/^data:image\/png;base64,/, "");
+    mailOptions.attachments.push({
+      filename: 'qrcode.png',
+      content: base64Data,
+      encoding: 'base64',
+      cid: 'customer-qr' // same cid value as in the html img src
+    });
+  }
+
+  return sendEmail(mailOptions);
 }
 
 // --- Admin Orders View ------------------------------------------------------------------
