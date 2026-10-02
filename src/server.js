@@ -62,6 +62,7 @@ app.use(
       const allowedOrigins = [
         "http://localhost:3000",
         "http://localhost:3001",
+        "https://fitfam-frontend.netlify.app",
       ];
 
       if (
@@ -137,13 +138,13 @@ app.use("/api/v1", v1Routes);
 
 app.use('/api/upload', uploadRouter);
 
-/* 8.5) Serve Vite frontend */
+/* 8.5) Serve Vite frontend 
 app.use(express.static(path.join(__dirname, '../../FitFam/dist')));
 
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api')) return next();
   res.sendFile(path.join(__dirname, '../../FitFam/dist', 'index.html'));
-});
+});*/
 
 /* 9) Errors */
 app.use(notFound);
