@@ -62,7 +62,7 @@ app.use(
       const allowedOrigins = [
         "http://localhost:3000",
         "http://localhost:3001",
-        "https://fitfam-frontend.netlify.app",
+        "https://delightful-starburst-68602b.netlify.app",
       ];
 
       if (
