@@ -63,11 +63,13 @@ app.use(
         "http://localhost:3000",
         "http://localhost:3001",
         "https://delightful-starburst-68602b.netlify.app",
-      ];
+        process.env.FRONTEND_URL,
+      ].filter(Boolean);
 
       if (
         !origin ||
         allowedOrigins.includes(origin) ||
+        /\.netlify\.app$/.test(origin) ||
         /^https:\/\/.*\.trycloudflare\.com$/.test(origin)
       ) {
         callback(null, true);
