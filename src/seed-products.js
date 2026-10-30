@@ -137,7 +137,7 @@ const products = [
 
 const seedDB = async () => {
   try {
-    await mongoose.connect(process.env.MONGO_URI, { dbName: "sarakuglobal" });
+    await mongoose.connect(process.env.MONGO_URI, { dbName: "fitfamstore" });
     console.log("Connected to MongoDB for Seeding...");
     
     await Product.deleteMany({});

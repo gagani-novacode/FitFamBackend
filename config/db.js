@@ -25,7 +25,7 @@ export async function connectDB(uri) {
 
   // Connect and cache the connection promise
   cachedDb = await mongoose.connect(uri, {
-    dbName: "sarakuglobal",
+    dbName: process.env.DB_NAME || "fitfamstore",
     serverSelectionTimeoutMS: 120000, // Keep your longer timeout
     socketTimeoutMS: 120000,
 
