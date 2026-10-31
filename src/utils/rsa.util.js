@@ -5,13 +5,18 @@ import crypto from "crypto";
  * Normalize PEM by ensuring proper line breaks.
  * Accepts a PEM string possibly with literal \n sequences.
  */
-function normalizePem(pem) {
+function normalizePem(pem, defaultType = "RSA PRIVATE KEY") {
   if (!pem) return pem;
-  // If PEM contains literal "\n" sequences (stored in env), convert them
-  if (pem.includes("\\n")) {
-    return pem.replace(/\\n/g, "\n");
+  let clean = pem.trim();
+  if (clean.includes("\\n")) {
+    clean = clean.replace(/\\n/g, "\n");
   }
-  return pem;
+  if (!clean.includes("-----BEGIN")) {
+    const type = defaultType;
+    const chunked = clean.replace(/\s+/g, "").match(/.{1,64}/g)?.join("\n") || clean;
+    return `-----BEGIN ${type}-----\n${chunked}\n-----END ${type}-----\n`;
+  }
+  return clean;
 }
 
 /**
@@ -32,7 +37,7 @@ export function signWithPrivateKey(privateKey, data) {
  * Returns boolean.
  */
 export function verifyWithPublicKey(publicKey, data, signatureBase64) {
-  const pem = normalizePem(publicKey);
+  const pem = normalizePem(publicKey, "PUBLIC KEY");
   const verifier = crypto.createVerify("RSA-SHA256");
   verifier.update(data, "utf8");
   verifier.end();

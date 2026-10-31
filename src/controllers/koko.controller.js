@@ -6,26 +6,25 @@ import { kokoOrderView } from "../utils/koko.client.js";
 import { markAsPaid, sendOrderPaidEmail } from "./store.controller.js";
 import logger from "../utils/logger.js";
 
-// Helper for KOKO data string
-function buildOrderCreateDataString(params) {
-  const keys = [
-    "_mId",
-    "api_key",
-    "_returnUrl",
-    "_cancelUrl",
-    "_responseUrl",
-    "_amount",
-    "_currency",
-    "_reference",
-    "_orderId",
-    "_pluginName",
-    "_pluginVersion",
-    "_description",
-    "_firstName",
-    "_lastName",
-    "_email",
-  ];
-  return keys.map((k) => params[k] || "").join("");
+// Helper for KOKO data string (Matches official Koko/Daraz specification)
+function buildOrderCreateDataString(p) {
+  return [
+    p._mId,
+    p._amount,
+    p._currency,
+    p._pluginName,
+    p._pluginVersion,
+    p._returnUrl,
+    p._cancelUrl,
+    p._orderId,
+    p._reference,
+    p._firstName,
+    p._lastName,
+    p._email,
+    p._description,
+    p.api_key,
+    p._responseUrl,
+  ].map((v) => (v !== undefined && v !== null ? String(v) : "")).join("");
 }
 
 export const prepareKokoCheckout = async (req, res) => {
@@ -78,6 +77,7 @@ export const prepareKokoCheckout = async (req, res) => {
     const lastName = customer.lastName || "";
     const email = customer.email || "";
 
+    const mobile = customer.phone || "";
     const description = (order.items || []).map((it) => `${it.qty}x item`).join(", ") || "order";
 
     const bodyParams = {
@@ -96,13 +96,25 @@ export const prepareKokoCheckout = async (req, res) => {
       _firstName: firstName,
       _lastName: lastName,
       _email: email,
+      _mobileNo: mobile,
     };
 
     const dataString = buildOrderCreateDataString(bodyParams);
     const signature = signWithPrivateKey(process.env.KOKO_PRIVATE_KEY, dataString);
 
+    const baseUrl = process.env.KOKO_API_BASE_URL || "https://qaapi.paykoko.com/api/merchants";
+    const actionUrl = `${baseUrl.replace(/\/+$/, "")}/orderCreate`;
+
     logger.info("prepareKokoCheckout: SUCCESS", { orderRef });
-    res.json({ ok: true, payment: { ...bodyParams, dataString, signature } });
+    res.json({
+      ok: true,
+      payment: {
+        ...bodyParams,
+        dataString,
+        signature,
+        _action_url: actionUrl,
+      },
+    });
   } catch (e) {
     logger.error("prepareKokoCheckout: FAILED", { orderRef, error: e.message });
     res.status(500).json({ ok: false, error: String(e.message || e) });

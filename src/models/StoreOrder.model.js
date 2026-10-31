@@ -51,6 +51,7 @@ const StoreOrderSchema = new mongoose.Schema(
     customer: { type: CustomerSchema, default: {} },
     items: { type: [LogItemSchema], default: [] },
     total: { type: Number, required: true, min: 0, default: 0 },
+    deliveryFee: { type: Number, default: 0 },
     discountCode: { type: String, trim: true },
     discountPercentage: { type: Number, default: 0 },
     discountAmount: { type: Number, default: 0 },

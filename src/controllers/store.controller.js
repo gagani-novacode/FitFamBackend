@@ -252,6 +252,7 @@ export const getCart = async (req, res) => {
 const recalculateCartTotal = (cart) => {
   const subtotal = cart.items.reduce((acc, it) => acc + it.lineTotal, 0);
   const delivery = cart.items.length > 0 ? 500 : 0;
+  cart.deliveryFee = delivery;
   
   cart.discountAmount = 0;
   if (cart.discountPercentage && cart.discountPercentage > 0) {
