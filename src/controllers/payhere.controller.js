@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import StoreOrder from "../models/StoreOrder.model.js";
 import { formatAmount2, buildCheckoutHash, buildMd5Sig } from "../utils/payhere.util.js";
-import { markAsPaid } from "./store.controller.js";
+import { markAsPaid, sendOrderPaidEmail } from "./store.controller.js";
 import logger from "../utils/logger.js";
 
 export async function payhereBuildCheckoutForStore(req, res) {
@@ -139,9 +139,9 @@ export async function payhereNotifyForStore(req, res) {
 
     let order;
     if (custom_2 && mongoose.isValidObjectId(custom_2)) {
-      order = await StoreOrder.findById(custom_2);
+      order = await StoreOrder.findById(custom_2).populate("items.product");
     } else {
-      order = await StoreOrder.findOne({ orderRef: order_id });
+      order = await StoreOrder.findOne({ orderRef: order_id }).populate("items.product");
     }
 
     if (!order) {
@@ -156,6 +156,17 @@ export async function payhereNotifyForStore(req, res) {
       order.paymentId = payment_id;
       await order.save();
       logger.info("payhereNotifyForStore: Order marked PAID", { orderRef: order.orderRef });
+
+      // Trigger order confirmation email with QR code
+      try {
+        await sendOrderPaidEmail(order);
+        logger.info("payhereNotifyForStore: Confirmation email dispatched", { orderRef: order.orderRef });
+      } catch (mailErr) {
+        logger.error("payhereNotifyForStore: Failed to dispatch confirmation email", {
+          orderRef: order.orderRef,
+          error: mailErr.message,
+        });
+      }
     } else {
       logger.warn("payhereNotifyForStore: Non-success status", { orderRef: order.orderRef, status: status_code });
       if (order.status === "CHECKOUT") {

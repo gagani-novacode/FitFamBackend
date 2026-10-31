@@ -32,6 +32,8 @@ const CustomerSchema = new mongoose.Schema(
     city: { type: String, trim: true },
     country: { type: String, trim: true },
     postalCode: { type: String, trim: true },
+    qrKey: { type: String, trim: true, index: true },
+    customerQR: { type: mongoose.Schema.Types.ObjectId, ref: "CustomerQR" },
   },
   { _id: false }
 );

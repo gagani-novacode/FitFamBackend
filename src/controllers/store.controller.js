@@ -6,7 +6,7 @@ import Discount from "../models/Discount.model.js";
 import Sale from "../models/Sale.model.js";
 import logger from "../utils/logger.js";
 import nodemailer from "nodemailer";
-import { processCustomerQR } from "../utils/qrcode.util.js";
+import { processCustomerQR, getOrCreateCustomerQR } from "../utils/qrcode.util.js";
 
 // --- Config & Helpers --------------------------------------------------------------------
 
@@ -61,7 +61,8 @@ export const createProduct = async (req, res) => {
   logger.info("createProduct: START", { name: req.body.name });
   try {
     const {
-      name, category, subCategory, price, originalPrice, description,
+      name, category, subCategory, clothingType, price, originalPrice, description,
+      descriptionAbout, descriptionFeatures, descriptionCare,
       sizes, stock, images, isNewProduct, isSale, badge, tags
     } = req.body;
 
@@ -69,13 +70,20 @@ export const createProduct = async (req, res) => {
       return res.status(400).json({ ok: false, error: "name, category, price are required" });
     }
 
+    const resolvedDesc = description || descriptionAbout || "";
+    const resolvedAbout = descriptionAbout || description || "";
+
     const product = await Product.create({
       name: escapeHTML(name),
       category: escapeHTML(category),
       subCategory: escapeHTML(subCategory || ""),
+      clothingType: clothingType || (category !== "Accessories" ? "Tops" : undefined),
       price: Number(price),
       originalPrice: originalPrice ? Number(originalPrice) : undefined,
-      description: escapeHTML(description),
+      description: escapeHTML(resolvedDesc),
+      descriptionAbout: escapeHTML(resolvedAbout),
+      descriptionFeatures: escapeHTML(descriptionFeatures || ""),
+      descriptionCare: escapeHTML(descriptionCare || ""),
       images: Array.isArray(images) ? images : [],
       sizes: Array.isArray(sizes) ? sizes : [],
       stock: typeof stock === "object" ? stock : {},
@@ -99,7 +107,14 @@ export const updateProduct = async (req, res) => {
   try {
     const updates = { ...req.body };
     if (updates.name) updates.name = escapeHTML(updates.name);
-    if (updates.description) updates.description = escapeHTML(updates.description);
+    if (updates.descriptionAbout && !updates.description) {
+      updates.description = escapeHTML(updates.descriptionAbout);
+    } else if (updates.description) {
+      updates.description = escapeHTML(updates.description);
+    }
+    if (updates.descriptionAbout) updates.descriptionAbout = escapeHTML(updates.descriptionAbout);
+    if (updates.descriptionFeatures) updates.descriptionFeatures = escapeHTML(updates.descriptionFeatures);
+    if (updates.descriptionCare) updates.descriptionCare = escapeHTML(updates.descriptionCare);
 
     const updated = await Product.findByIdAndUpdate(id, updates, { new: true, runValidators: true });
     if (!updated) {
@@ -121,7 +136,14 @@ export const patchProduct = async (req, res) => {
   try {
     const updates = { ...req.body };
     if (updates.name) updates.name = escapeHTML(updates.name);
-    if (updates.description) updates.description = escapeHTML(updates.description);
+    if (updates.descriptionAbout && !updates.description) {
+      updates.description = escapeHTML(updates.descriptionAbout);
+    } else if (updates.description) {
+      updates.description = escapeHTML(updates.description);
+    }
+    if (updates.descriptionAbout) updates.descriptionAbout = escapeHTML(updates.descriptionAbout);
+    if (updates.descriptionFeatures) updates.descriptionFeatures = escapeHTML(updates.descriptionFeatures);
+    if (updates.descriptionCare) updates.descriptionCare = escapeHTML(updates.descriptionCare);
 
     const updated = await Product.findByIdAndUpdate(id, { $set: updates }, { new: true });
     if (!updated) {
@@ -457,6 +479,20 @@ export const moveToCheckout = async (req, res) => {
         }
       }
 
+      // Retrieve or create persistent customer QR record (matches existing customer by email)
+      let customerQRDoc = null;
+      try {
+        const qrResult = await getOrCreateCustomerQR({
+          email: customer.email,
+          firstName: customer.firstName,
+          lastName: customer.lastName,
+          phone: customer.phone,
+        });
+        customerQRDoc = qrResult.customerQR;
+      } catch (qrErr) {
+        logger.error(`${C} :: moveToCheckout() : Failed to get/create customer QR | ${qrErr.message}`);
+      }
+
       const sanitizedCustomer = {
         firstName: escapeHTML(customer.firstName),
         lastName: escapeHTML(customer.lastName),
@@ -466,6 +502,8 @@ export const moveToCheckout = async (req, res) => {
         city: escapeHTML(customer.city),
         country: escapeHTML(customer.country),
         postalCode: escapeHTML(customer.postalCode),
+        qrKey: customerQRDoc ? customerQRDoc.qrKey : undefined,
+        customerQR: customerQRDoc ? customerQRDoc._id : undefined,
       };
 
       order.status = "CHECKOUT";
@@ -596,10 +634,21 @@ export const getMyOrders = async (req, res) => {
 
 // --- Internal Helper for Email ----------------------------------------------------------
 
-async function sendOrderPaidEmail(order) {
+export async function sendOrderPaidEmail(order) {
   let qrDataURL = "";
   try {
-    qrDataURL = await processCustomerQR(order.customer);
+    const qrResult = await getOrCreateCustomerQR(order.customer);
+    qrDataURL = qrResult.qrDataURL;
+
+    // If order was missing qrKey, stamp it on the order now
+    if (!order.customer?.qrKey && qrResult.customerQR) {
+      if (!order.customer) order.customer = {};
+      order.customer.qrKey = qrResult.customerQR.qrKey;
+      order.customer.customerQR = qrResult.customerQR._id;
+      if (typeof order.save === "function") {
+        await order.save();
+      }
+    }
   } catch (err) {
     logger.error("Failed to process customer QR code for email", { error: err.message });
   }
@@ -732,19 +781,10 @@ async function sendOrderPaidEmail(order) {
                   ${qrDataURL ? `
                   <div style="text-align: center; margin-bottom: 30px;">
                     <div style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: #111111; margin-bottom: 15px;">Your Customer ID</div>
-                    <img src="cid:customer-qr" alt="Customer QR Code" style="border: 2px solid #111111; padding: 10px; background: #fff;" />
+                    <img src="${qrDataURL}" alt="Customer QR Code" width="150" height="150" style="border: 2px solid #111111; padding: 10px; background: #fff; display: inline-block; width: 150px; height: 150px;" />
                     <div style="font-size: 11px; color: #888888; margin-top: 10px;">Show this at our store for quick access!</div>
                   </div>
                   ` : ''}
-
-                  <!-- Button -->
-                  <table border="0" cellpadding="0" cellspacing="0" width="100%">
-                    <tr>
-                      <td align="center">
-                        <a href="https://frost-simpson-choose-annotated.trycloudflare.com/account" style="display: inline-block; background-color: #111111; color: #ffffff; text-decoration: none; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; padding: 15px 30px; border: 2px solid #111111; transition: all 0.3s ease;">Track Your Order</a>
-                      </td>
-                    </tr>
-                  </table>
 
                 </td>
               </tr>
@@ -779,10 +819,9 @@ async function sendOrderPaidEmail(order) {
   if (qrDataURL) {
     const base64Data = qrDataURL.replace(/^data:image\/png;base64,/, "");
     mailOptions.attachments.push({
-      filename: 'qrcode.png',
-      content: base64Data,
-      encoding: 'base64',
-      cid: 'customer-qr' // same cid value as in the html img src
+      filename: 'customer-qr.png',
+      content: Buffer.from(base64Data, 'base64'),
+      cid: 'customer-qr'
     });
   }
 

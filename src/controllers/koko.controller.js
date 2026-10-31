@@ -3,7 +3,7 @@ import Product from "../models/Product.model.js";
 import StoreOrder from "../models/StoreOrder.model.js";
 import { signWithPrivateKey, verifyWithPublicKey } from "../utils/rsa.util.js";
 import { kokoOrderView } from "../utils/koko.client.js";
-import { markAsPaid } from "./store.controller.js";
+import { markAsPaid, sendOrderPaidEmail } from "./store.controller.js";
 import logger from "../utils/logger.js";
 
 // Helper for KOKO data string
@@ -133,7 +133,7 @@ export const handleKokoResponse = async (req, res) => {
       return res.status(200).send("INVALID_SIGNATURE");
     }
 
-    const order = await StoreOrder.findOne({ orderRef: orderId });
+    const order = await StoreOrder.findOne({ orderRef: orderId }).populate("items.product");
     if (!order) {
       logger.warn("handleKokoResponse: unknown orderRef", { orderId });
       return res.status(200).send("ORDER_NOT_FOUND");
@@ -147,6 +147,16 @@ export const handleKokoResponse = async (req, res) => {
       order.paymentId = trnId;
       await order.save();
       logger.info("handleKokoResponse: Order finalized", { orderId });
+
+      try {
+        await sendOrderPaidEmail(order);
+        logger.info("handleKokoResponse: Confirmation email dispatched", { orderId });
+      } catch (mailErr) {
+        logger.error("handleKokoResponse: Failed to dispatch confirmation email", {
+          orderId,
+          error: mailErr.message,
+        });
+      }
     } else {
       logger.warn("handleKokoResponse: Non-success status", { orderId, status });
       if (order.status === "CHECKOUT") {

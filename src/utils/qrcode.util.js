@@ -3,14 +3,13 @@ import qrcode from "qrcode";
 import CustomerQR from "../models/CustomerQR.model.js";
 
 /**
- * Process a customer's QR code.
- * If the customer (by email) already has a QR key, returns their existing QR code data URL.
- * Otherwise, generates a new QR key, saves it in the database, and returns the new QR code data URL.
+ * Get an existing CustomerQR or create a new one for this email.
+ * Updates firstName, lastName, phone if provided.
  *
- * @param {Object} customer - The customer object containing email, firstName, lastName.
- * @returns {Promise<string>} - A promise that resolves to a base64 encoded PNG data URI of the QR code.
+ * @param {Object} customer - The customer object containing email, firstName, lastName, phone.
+ * @returns {Promise<{ customerQR: Object, qrDataURL: string }>}
  */
-export async function processCustomerQR(customer) {
+export async function getOrCreateCustomerQR(customer) {
   if (!customer || !customer.email) {
     throw new Error("Customer email is required to process QR code");
   }
@@ -19,25 +18,42 @@ export async function processCustomerQR(customer) {
   let customerQR = await CustomerQR.findOne({ email });
 
   if (!customerQR) {
-    // Generate a new unique key
     const qrKey = crypto.randomBytes(8).toString("hex").toUpperCase();
-    
-    // Save to the database
     customerQR = await CustomerQR.create({
-      email: email,
+      email,
       firstName: customer.firstName || "",
       lastName: customer.lastName || "",
       phone: customer.phone || "",
-      qrKey: qrKey,
+      qrKey,
     });
+  } else {
+    // Optionally keep latest phone/name in sync if previously empty
+    let updated = false;
+    if (!customerQR.phone && customer.phone) {
+      customerQR.phone = customer.phone;
+      updated = true;
+    }
+    if (!customerQR.firstName && customer.firstName) {
+      customerQR.firstName = customer.firstName;
+      updated = true;
+    }
+    if (!customerQR.lastName && customer.lastName) {
+      customerQR.lastName = customer.lastName;
+      updated = true;
+    }
+    if (updated) {
+      await customerQR.save();
+    }
   }
 
-  // Generate Base64 Image string natively
-  try {
-    const qrDataURL = await qrcode.toDataURL(customerQR.qrKey, { width: 150, margin: 1 });
-    return qrDataURL;
-  } catch (err) {
-    console.error("Error generating QR code:", err);
-    throw err;
-  }
+  const qrDataURL = await qrcode.toDataURL(customerQR.qrKey, { width: 150, margin: 1 });
+  return { customerQR, qrDataURL };
+}
+
+/**
+ * Returns just the QR data URL for backward compatibility.
+ */
+export async function processCustomerQR(customer) {
+  const { qrDataURL } = await getOrCreateCustomerQR(customer);
+  return qrDataURL;
 }
