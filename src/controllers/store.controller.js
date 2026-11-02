@@ -7,6 +7,7 @@ import Sale from "../models/Sale.model.js";
 import logger from "../utils/logger.js";
 import nodemailer from "nodemailer";
 import { processCustomerQR, getOrCreateCustomerQR } from "../utils/qrcode.util.js";
+import { notifySubscribersAboutOffer } from "../utils/saleNotification.util.js";
 
 // --- Config & Helpers --------------------------------------------------------------------
 
@@ -124,6 +125,30 @@ export const updateProduct = async (req, res) => {
 
     logger.info("updateProduct: SUCCESS", { productId: id });
     res.json({ ok: true, product: updated });
+
+    // Notify subscribers when a product is marked on sale
+    // Condition: isSale is being set to true (boolean or coerced)
+    if (Boolean(updates.isSale) === true && Boolean(updated.isSale) === true) {
+      const _frontendUrl = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/+$/, "");
+      const originalP = updated.originalPrice || null;
+      const saleP = updated.price;
+      const discountAmt = originalP && originalP > saleP ? originalP - saleP : null;
+      logger.info("updateProduct: triggering subscriber offer notification", { productId: updated._id });
+      setImmediate(() =>
+        notifySubscribersAboutOffer({
+          saleName: `Special Deal: ${updated.name}`,
+          products: [{
+            _id: updated._id,
+            name: updated.name,
+            image: updated.images && updated.images[0] ? updated.images[0] : "",
+            originalPrice: originalP,
+            salePrice: saleP,
+            discountAmount: discountAmt,
+            url: `${_frontendUrl}/product/${updated._id}`,
+          }],
+        }).catch((err) => logger.error("updateProduct offer notification failed:", { error: err.message }))
+      );
+    }
   } catch (e) {
     logger.error("updateProduct: FAILED", { productId: id, error: e.message });
     res.status(400).json({ ok: false, error: e.message });
@@ -153,6 +178,29 @@ export const patchProduct = async (req, res) => {
 
     logger.info("patchProduct: SUCCESS", { productId: id });
     res.json({ ok: true, product: updated });
+
+    // Notify subscribers when a product is patched to be on sale
+    if (Boolean(updates.isSale) === true && Boolean(updated.isSale) === true) {
+      const _frontendUrl = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/+$/, "");
+      const originalP = updated.originalPrice || null;
+      const saleP = updated.price;
+      const discountAmt = originalP && originalP > saleP ? originalP - saleP : null;
+      logger.info("patchProduct: triggering subscriber offer notification", { productId: updated._id });
+      setImmediate(() =>
+        notifySubscribersAboutOffer({
+          saleName: `Special Deal: ${updated.name}`,
+          products: [{
+            _id: updated._id,
+            name: updated.name,
+            image: updated.images && updated.images[0] ? updated.images[0] : "",
+            originalPrice: originalP,
+            salePrice: saleP,
+            discountAmount: discountAmt,
+            url: `${_frontendUrl}/product/${updated._id}`,
+          }],
+        }).catch((err) => logger.error("patchProduct offer notification failed:", { error: err.message }))
+      );
+    }
   } catch (e) {
     logger.error("patchProduct: FAILED", { productId: id, error: e.message });
     res.status(400).json({ ok: false, error: e.message });
@@ -191,7 +239,6 @@ export const listProducts = async (req, res) => {
           saleId: activeSale._id,
           saleName: activeSale.name,
           isSale: true,
-          originalPrice: p.price,
         };
       }
       return p;
@@ -215,8 +262,29 @@ export const getProductById = async (req, res) => {
       logger.warn(`${C} :: getProductById() : Failed | Product not found | ${id}`);
       return res.status(404).json({ ok: false, error: "Product not found" });
     }
+
+    const activeSale = await getActiveSaleDoc();
+    let enriched = product;
+    if (activeSale) {
+      const productIdStr = product._id.toString();
+      const discountAmt = activeSale.products.get
+        ? activeSale.products.get(productIdStr)
+        : activeSale.products[productIdStr];
+      if (discountAmt && discountAmt > 0) {
+        const salePrice = Math.max(0, product.price - discountAmt);
+        enriched = {
+          ...product,
+          salePrice,
+          saleDiscountAmount: discountAmt,
+          saleId: activeSale._id,
+          saleName: activeSale.name,
+          isSale: true,
+        };
+      }
+    }
+
     logger.info(`${C} :: getProductById() : End`);
-    res.json({ ok: true, product });
+    res.json({ ok: true, product: enriched });
   } catch (e) {
     logger.error(`${C} :: getProductById() : Failed | ${e.message}`);
     res.status(400).json({ ok: false, error: e.message });
