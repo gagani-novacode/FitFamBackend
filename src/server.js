@@ -64,6 +64,8 @@ app.use(
         "http://localhost:3000",
         "http://localhost:3001",
         "https://delightful-starburst-68602b.netlify.app",
+        "https://fitfamactive.com",
+        "https://www.fitfamactive.com",
         process.env.FRONTEND_URL,
       ].filter(Boolean);
 
