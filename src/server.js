@@ -21,6 +21,7 @@ setServers(['8.8.8.8', '8.8.4.4']);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express(); // ← app is now initialized first
+app.set('trust proxy', 1);
 
 /* Static files */
 app.use('/uploads', (req, res, next) => {
