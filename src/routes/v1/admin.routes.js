@@ -1,3 +1,11 @@
+import {
+  getAllCategoriesAdmin,
+  createCategory,
+  updateCategory,
+  deleteCategory,
+  addSubcategory,
+  deleteSubcategory,
+} from "../../controllers/category.controller.js";
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { param, body } from "express-validator";
@@ -34,7 +42,7 @@ r.use(protect, admin);
 r.post("/products",
     adminLimiter,
     body("name").trim().notEmpty().withMessage("name is required"),
-    body("category").trim().isIn(["Men", "Women", "Accessories"]),
+    body("category").trim().notEmpty().withMessage("Category is required"),
     body("price").isNumeric().withMessage("price must be a number"),
     validate,
     createProduct
@@ -99,5 +107,14 @@ r.get("/sales/:id", adminLimiter, getSaleById);
 r.post("/sales", adminLimiter, createSale);
 r.put("/sales/:id", adminLimiter, updateSale);
 r.delete("/sales/:id", adminLimiter, deleteSale);
+
+
+// --- Categories ---
+r.get("/categories", adminLimiter, getAllCategoriesAdmin);
+r.post("/categories", adminLimiter, createCategory);
+r.put("/categories/:id", adminLimiter, updateCategory);
+r.delete("/categories/:id", adminLimiter, deleteCategory);
+r.post("/categories/:id/subcategories", adminLimiter, addSubcategory);
+r.delete("/categories/:id/subcategories/:subId", adminLimiter, deleteSubcategory);
 
 export default r;

@@ -3,9 +3,9 @@ import mongoose from "mongoose";
 const ProductSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
-    category: { type: String, enum: ["Men", "Women", "Accessories"], required: true },
+    category: { type: String, required: true, trim: true },
     subCategory: { type: String, trim: true, default: "" },
-    clothingType: { type: String, enum: ["Tops", "Bottoms"], default: "Tops" },
+    clothingType: { type: String, trim: true, default: "Tops" },
     price: { type: Number, required: true, min: 0 },
     originalPrice: { type: Number, min: 0 },
     description: { type: String, trim: true },
