@@ -19,6 +19,14 @@ const ProductSchema = new mongoose.Schema(
     isSale: { type: Boolean, default: false },
     badge: { type: String, trim: true }, // e.g., "HOT", "NEW"
     tags: { type: [String], default: [] },
+    sizeGuide: { type: mongoose.Schema.Types.ObjectId, ref: "SizeGuide", default: null },
+    customSizeGuide: {
+      enabled: { type: Boolean, default: false },
+      columns: { type: [String], default: [] },
+      rows: { type: [mongoose.Schema.Types.Mixed], default: [] },
+      unit: { type: String, default: "in" },
+      measurementNotes: { type: String, default: "" },
+    },
   },
   { timestamps: true }
 );

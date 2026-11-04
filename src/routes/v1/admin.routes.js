@@ -1,4 +1,10 @@
 import {
+  getAllSizeGuidesAdmin,
+  createSizeGuide,
+  updateSizeGuide,
+  deleteSizeGuide,
+} from "../../controllers/sizeGuide.controller.js";
+import {
   getAllCategoriesAdmin,
   createCategory,
   updateCategory,
@@ -116,5 +122,12 @@ r.put("/categories/:id", adminLimiter, updateCategory);
 r.delete("/categories/:id", adminLimiter, deleteCategory);
 r.post("/categories/:id/subcategories", adminLimiter, addSubcategory);
 r.delete("/categories/:id/subcategories/:subId", adminLimiter, deleteSubcategory);
+
+
+// --- Size Guides ---
+r.get("/size-guides", adminLimiter, getAllSizeGuidesAdmin);
+r.post("/size-guides", adminLimiter, createSizeGuide);
+r.put("/size-guides/:id", adminLimiter, updateSizeGuide);
+r.delete("/size-guides/:id", adminLimiter, deleteSizeGuide);
 
 export default r;

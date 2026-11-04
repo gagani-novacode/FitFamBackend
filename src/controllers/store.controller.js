@@ -64,7 +64,8 @@ export const createProduct = async (req, res) => {
     const {
       name, category, subCategory, clothingType, price, originalPrice, description,
       descriptionAbout, descriptionFeatures, descriptionCare,
-      sizes, stock, images, isNewProduct, isSale, badge, tags
+      sizes, stock, images, isNewProduct, isSale, badge, tags,
+      sizeGuide, customSizeGuide
     } = req.body;
 
     if (!name || !category || price === undefined) {
@@ -92,6 +93,8 @@ export const createProduct = async (req, res) => {
       isSale: !!isSale,
       badge: escapeHTML(badge),
       tags: Array.isArray(tags) ? tags.map(escapeHTML) : [],
+      sizeGuide: sizeGuide || null,
+      customSizeGuide: customSizeGuide || { enabled: false },
     });
 
     logger.info("createProduct: SUCCESS", { productId: product._id });
@@ -219,7 +222,7 @@ export const listProducts = async (req, res) => {
   const C = "[storeController]";
   logger.info(`${C} :: listProducts() : Start`);
   try {
-    const products = await Product.find().lean();
+    const products = await Product.find().populate("sizeGuide").lean();
 
     // Attach sale pricing if an active sale exists
     const activeSale = await getActiveSaleDoc();
@@ -257,7 +260,7 @@ export const getProductById = async (req, res) => {
   const { id } = req.params;
   logger.info(`${C} :: getProductById() : Start`);
   try {
-    const product = await Product.findById(id).lean();
+    const product = await Product.findById(id).populate("sizeGuide").lean();
     if (!product) {
       logger.warn(`${C} :: getProductById() : Failed | Product not found | ${id}`);
       return res.status(404).json({ ok: false, error: "Product not found" });

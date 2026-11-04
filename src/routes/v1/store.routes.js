@@ -1,3 +1,4 @@
+import { getSizeGuides, getSizeGuideById } from "../../controllers/sizeGuide.controller.js";
 import { getCategories } from "../../controllers/category.controller.js";
 import { Router } from "express";
 import multer from "multer";
@@ -42,6 +43,10 @@ const limiter = rateLimit({ windowMs: 30 * 1000, max: 60 });
 
 // --- Categories (public) ---
 r.get("/categories", getCategories);
+
+// --- Size Guides (public) ---
+r.get("/size-guides", getSizeGuides);
+r.get("/size-guides/:id", getSizeGuideById);
 
 // --- Products (public) ---
 r.get("/products", listProducts);
