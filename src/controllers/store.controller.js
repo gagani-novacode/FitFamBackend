@@ -542,7 +542,39 @@ export const moveToCheckout = async (req, res) => {
       }
 
       for (const it of order.items) {
-        // Decrease stock for the specific size
+        // Check if product uses color variations
+        const prodDoc = await Product.findById(it.product).session(session);
+        if (!prodDoc) {
+          throw new Error(`Product not found for item: ${it.product}`);
+        }
+
+        const hasVars = prodDoc.hasVariations && Array.isArray(prodDoc.variations) && prodDoc.variations.length > 0;
+        if (hasVars && it.color) {
+          // Find variation matching it.color (case-insensitive)
+          const varIndex = prodDoc.variations.findIndex(
+            v => (v.colorName || '').trim().toLowerCase() === (it.color || '').trim().toLowerCase()
+          );
+
+          if (varIndex > -1) {
+            const stockKey = `variations.${varIndex}.stock.${it.size}`;
+            const query = { _id: it.product };
+            query[stockKey] = { $gte: it.qty };
+
+            const update = { $inc: {} };
+            update.$inc[stockKey] = -it.qty;
+            // Also deduct from aggregate root stock if present
+            const rootStockKey = `stock.${it.size}`;
+            update.$inc[rootStockKey] = -it.qty;
+
+            const res = await Product.updateOne(query, update, { session });
+            if (res.modifiedCount !== 1) {
+              throw new Error(`Insufficient stock for item: ${prodDoc.name} (${it.color} / ${it.size})`);
+            }
+            continue;
+          }
+        }
+
+        // Fallback: standard simple product stock deduction
         const stockKey = `stock.${it.size}`;
         const query = { _id: it.product };
         query[stockKey] = { $gte: it.qty };
@@ -642,6 +674,20 @@ export const cleanupExpiredOrders = async (req, res) => {
       await session.withTransaction(async () => {
         logger.debug("cleanupExpiredOrders: Releasing inventory for order", { orderRef: order.orderRef });
         for (const it of order.items) {
+          const prodDoc = await Product.findById(it.product).session(session);
+          if (prodDoc && prodDoc.hasVariations && Array.isArray(prodDoc.variations) && it.color) {
+            const varIndex = prodDoc.variations.findIndex(
+              v => (v.colorName || '').trim().toLowerCase() === (it.color || '').trim().toLowerCase()
+            );
+            if (varIndex > -1) {
+              const stockKey = `variations.${varIndex}.stock.${it.size}`;
+              const rootStockKey = `stock.${it.size}`;
+              const update = { $inc: { [stockKey]: it.qty, [rootStockKey]: it.qty } };
+              await Product.updateOne({ _id: it.product }, update, { session });
+              continue;
+            }
+          }
+
           const stockKey = `stock.${it.size}`;
           const update = { $inc: {} };
           update.$inc[stockKey] = it.qty;
