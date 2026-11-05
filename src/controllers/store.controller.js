@@ -65,7 +65,7 @@ export const createProduct = async (req, res) => {
       name, category, subCategory, clothingType, price, originalPrice, description,
       descriptionAbout, descriptionFeatures, descriptionCare,
       sizes, stock, images, isNewProduct, isSale, badge, tags,
-      sizeGuide, customSizeGuide
+      sizeGuide, customSizeGuide, hasVariations, variations
     } = req.body;
 
     if (!name || !category || price === undefined) {
@@ -89,6 +89,8 @@ export const createProduct = async (req, res) => {
       images: Array.isArray(images) ? images : [],
       sizes: Array.isArray(sizes) ? sizes : [],
       stock: typeof stock === "object" ? stock : {},
+      hasVariations: Array.isArray(variations) && variations.length > 0,
+      variations: Array.isArray(variations) ? variations : [],
       isNewProduct: !!isNewProduct,
       isSale: !!isSale,
       badge: escapeHTML(badge),
@@ -335,7 +337,7 @@ const recalculateCartTotal = (cart) => {
 
 export const addToCart = async (req, res) => {
   const C = "[storeController]";
-  const { orderRef, productId, size, qty = 1 } = req.body;
+  const { orderRef, productId, size, color = "", qty = 1 } = req.body;
   logger.info(`${C} :: addToCart() : Start`);
   try {
     if (!size) {
@@ -364,7 +366,9 @@ export const addToCart = async (req, res) => {
       cart = await StoreOrder.create({ status: "CART" });
     }
 
-    const itemIndex = cart.items.findIndex(it => it.product.toString() === productId && it.size === size);
+    const itemIndex = cart.items.findIndex(it =>
+      it.product.toString() === productId && it.size === size && (it.color || "") === (color || "")
+    );
     if (itemIndex > -1) {
       cart.items[itemIndex].qty += Math.max(0, Number(qty));
       cart.items[itemIndex].lineTotal = cart.items[itemIndex].unitPrice * cart.items[itemIndex].qty;
@@ -372,6 +376,7 @@ export const addToCart = async (req, res) => {
       cart.items.push({
         product: productId,
         size: size,
+        color: color || "",
         qty: Math.max(1, Number(qty)),
         unitPrice,
         lineTotal: unitPrice * Math.max(1, Number(qty))
@@ -391,7 +396,7 @@ export const addToCart = async (req, res) => {
 
 export const removeFromCart = async (req, res) => {
   const C = "[storeController]";
-  const { orderRef, productId, size } = req.body;
+  const { orderRef, productId, size, color = "" } = req.body;
   logger.info(`${C} :: removeFromCart() : Start`);
   try {
     const cart = await StoreOrder.findOne({ orderRef, status: "CART" });
@@ -399,7 +404,7 @@ export const removeFromCart = async (req, res) => {
       return res.status(404).json({ ok: false, error: "Cart not found" });
     }
 
-    cart.items = cart.items.filter(it => !(it.product.toString() === productId && it.size === size));
+    cart.items = cart.items.filter(it => !(it.product.toString() === productId && it.size === size && (it.color || "") === (color || "")));
     recalculateCartTotal(cart);
     await cart.save();
 
@@ -413,7 +418,7 @@ export const removeFromCart = async (req, res) => {
 
 export const updateCartQty = async (req, res) => {
   const C = "[storeController]";
-  const { orderRef, productId, size, qty } = req.body;
+  const { orderRef, productId, size, color = "", qty } = req.body;
   logger.info(`${C} :: updateCartQty() : Start`);
   try {
     const cart = await StoreOrder.findOne({ orderRef, status: "CART" });

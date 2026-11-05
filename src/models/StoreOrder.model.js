@@ -14,7 +14,8 @@ function generateOrderRef() {
 const LogItemSchema = new mongoose.Schema(
   {
     product: { type: mongoose.Schema.Types.ObjectId, ref: "Product", required: true },
-    size: { type: String, required: true },
+    size:  { type: String, required: true },
+    color: { type: String, default: "" },  // color variation name
     qty: { type: Number, required: true, min: 1 },
     unitPrice: { type: Number, required: true, min: 0 },
     lineTotal: { type: Number, required: true, min: 0 },
